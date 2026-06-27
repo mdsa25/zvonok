@@ -362,6 +362,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
           <input class="field" id="pushUrl2" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px;font-family:var(--mono);font-size:12px" placeholder="Адрес пуш-сервера (Яндекс-функция)">
           <button class="btn secondary sm" id="btnSavePush2">Сохранить пуш-сервер</button>
           <button class="btn secondary sm" id="btnIosPush" style="margin-top:8px">🔔 Фоновые звонки (iPhone)</button>
+          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:13px;line-height:1.35;cursor:pointer"><input type="checkbox" id="forceRelay2" style="margin-top:2px"> Звонить <b>только через свой TURN</b> (надёжно между разными сетями; включать после того, как вписан свой TURN выше)</label>
         </div>
       </details>
     </div>
@@ -430,27 +431,40 @@ function customTurn(){
     });
   }catch(_){ return []; }
 }
-function iceConfig(){ return { iceServers: [ ...customTurn(), ...ICE.iceServers ] }; }
+/* Бесплатно: обычный P2P — прямое соединение + STUN + публичные TURN «на авось».
+   Свой TURN (необязательно) можно добавить в ⚙; галочка «только через свой TURN»
+   включает режим, когда медиа идёт лишь через него. */
+function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay")==="1"; }catch(_){ return false; } }
+function iceConfig(){
+  var ct = customTurn();
+  if (forceRelay() && ct.length){
+    return { iceServers: [ ...ct, ...ICE.iceServers.filter(function(x){ return /^stun:/i.test(Array.isArray(x.urls)?x.urls[0]:x.urls); }) ], iceTransportPolicy: "relay" };
+  }
+  return { iceServers: [ ...ct, ...ICE.iceServers ] };
+}
 const ICE = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun.cloudflare.com:3478" },
-    /* публичные ретрансляторы — ненадёжные, используются как «авось»;
-       свой надёжный можно добавить через ⚙ (см. инструкцию) */
+    { urls: "stun:stun2.l.google.com:19302" },
+    /* публичные TURN — «авось» (в РФ ненадёжны). Надёжный TURN добавьте через ⚙
+       или поднимите свой на Яндексе (см. инструкцию) — это чинит звонки между сетями. */
     { urls: "turn:openrelay.metered.ca:80",  username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
     { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:freestun.net:3478", username: "free", credential: "free" },
+    { urls: "turns:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
   ]
 };
 const APP_ID = "mk-zvonok-3";
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
   "wss://nos.lol",
-  "wss://relay.damus.io",
   "wss://offchain.pub",
-  "wss://relay.mostr.pub",
-  "wss://relay.primal.net",
+  "wss://nostr.mom",
+  "wss://nostr.oxtr.dev",
+  "wss://relay.snort.social",
+  "wss://nostr-pub.wellorder.net",
+  "wss://nostr.data.haus",
 ];
 const MAX_PEOPLE = 7;
 const PREFIX = "zvk2r-";
@@ -466,7 +480,7 @@ const SLOTS  = 7;                              // сколько человек 
 const GENERAL_ROOM = "obshiy-" + SECRET;        // комната общего созвона
 /* Адрес пуш-сервера (Яндекс-функция). Берётся из настроек ⚙ (localStorage),
    поэтому адрес можно вписать без пересборки приложения. */
-function pushUrl(){ try{ var u=(localStorage.getItem("zvk_push_url")||"").trim(); if(u) return u.replace(/\/+$/,""); }catch(_){} return ""; }
+function pushUrl(){ try{ var u=(localStorage.getItem("zvk_push_url")||"").trim(); if(u) return u.replace(/\/+$/,""); }catch(_){} return "https://functions.yandexcloud.net/d4e6s5me4ppcuf6mg6jc"; }
 const VAPID_PUBLIC = "BI94b0iXKPaUSPrQP2pA2QfUPqf-IZqYbU88wTgkLqkFpQP395ihHnAqNiVS6koauMav3D6ukFJmxx1kIVKzYyA";   // публичный VAPID-ключ для пуша на iPhone
 
 /* ── реестр «куда слать пуш» прямо на устройствах (без облачного хранилища):
@@ -1957,6 +1971,8 @@ function wireUI(){
   const pu=$("pushUrl2");
   if(pu){ try{ pu.value=localStorage.getItem("zvk_push_url")||""; }catch(_){} bind("btnSavePush2",()=>{ try{ localStorage.setItem("zvk_push_url",(pu.value||"").trim()); }catch(_){} const sv=$("btnSavePush2"); if(sv){ sv.textContent="✓ Сохранено"; setTimeout(()=>sv.textContent="Сохранить пуш-сервер",1600);} }); }
   bind("btnIosPush",()=>{ if(window.__enableIosPush) window.__enableIosPush(); });
+  const fr=$("forceRelay2");
+  if(fr){ try{ fr.checked = forceRelay(); }catch(_){} fr.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_force_relay", fr.checked?"1":"0"); }catch(_){} const t=$("forceRelayHint"); }); }
 }
 
 /* прихожая может «уснуть» в фоне — поднимаем заново при возврате в приложение */
