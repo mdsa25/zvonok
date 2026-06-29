@@ -235,6 +235,23 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
 .pill.tap{cursor:pointer;border:none;font:inherit}
 .pill.tap:active{transform:scale(.95)}
 .topbar .pill{background:rgba(10,16,26,.55);backdrop-filter:blur(10px);border:1px solid rgba(255,255,255,.08)}
+  #timer{display:flex;flex-direction:column;align-items:center;line-height:1.05;padding-top:4px;padding-bottom:4px}
+  #connType{font-size:9px;color:#9fb0c5;font-weight:500;margin-top:1px;max-width:128px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .tile .novid .avbadge{display:none;align-items:center;gap:6px;font-size:20px;margin-top:6px}
+  #statsBar{position:absolute;left:0;right:0;top:0;z-index:9;display:none;justify-content:center;gap:10px;
+    font-family:var(--mono);font-size:11px;color:#cfe3ff;background:rgba(8,12,20,.6);
+    padding:3px 8px;backdrop-filter:blur(6px);pointer-events:none;white-space:nowrap;overflow:hidden}
+  #statsBar.on{display:flex}
+  #netOverlay{position:absolute;inset:0;z-index:30;display:none}
+  #netOverlay.show{display:block}
+  #netOverlay .nm-bd{position:absolute;inset:0;background:rgba(0,0,0,.55)}
+  #netOverlay .nm-panel{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+    width:min(360px,92vw);background:rgba(16,21,28,.97);border:1px solid rgba(255,255,255,.1);
+    border-radius:16px;padding:16px 18px;color:#e8eef6;box-shadow:0 20px 60px rgba(0,0,0,.5)}
+  .nm-title{font-weight:700;font-size:16px;margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+  .nm-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.06);font-size:14px}
+  .nm-row b{font-family:var(--mono);font-weight:600}
+  .nm-toggle{display:flex;align-items:center;gap:10px;margin-top:14px;font-size:13px;cursor:pointer}
 .ctl{backdrop-filter:blur(10px);transition:transform .08s,background .15s}
 .ctl:active{transform:scale(.92)}
 .ctl.end{background:linear-gradient(135deg,#ff5d5d,#e23b3b);border:none;color:#fff}
@@ -299,7 +316,8 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
     <button class="btn secondary" id="btnShareRoom" style="max-width:300px">📤 Отправить ссылку на комнату</button>
   </div>
   <div class="topbar">
-    <div class="pill t" id="timer">00:00</div>
+    <div class="pill t" id="timer"><span id="timeVal">00:00</span><span id="connType">—</span></div>
+    <button class="pill tap t" id="netPill" title="Трафик за сеанс">⇅ 0 МБ</button>
     <button class="pill tap" id="countPill" title="Меню звонков">👤 1</button>
     <button class="pill" id="btnMode">🎙 Аудио для всех</button>
   </div>
@@ -314,6 +332,25 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
   <input type="file" id="fileInput" style="display:none">
   <div id="xfers"></div>
   <div id="toast"></div>
+  <div id="statsBar"></div>
+
+  <!-- подробные счётчики трафика (тап по ⇅) -->
+  <div id="netOverlay">
+    <div class="nm-bd" id="netBackdrop"></div>
+    <div class="nm-panel glass">
+      <div class="nm-title"><span>Трафик за сеанс</span><button class="menu-x" id="netClose">✕</button></div>
+      <div class="nm-row"><span>Текущая скорость ↓</span><b id="nmCurRx">0</b></div>
+      <div class="nm-row"><span>Текущая скорость ↑</span><b id="nmCurTx">0</b></div>
+      <div class="nm-row"><span>Средняя скорость ↓</span><b id="nmAvgRx">0</b></div>
+      <div class="nm-row"><span>Средняя скорость ↑</span><b id="nmAvgTx">0</b></div>
+      <div class="nm-row"><span>Принято</span><b id="nmRx">0</b></div>
+      <div class="nm-row"><span>Передано</span><b id="nmTx">0</b></div>
+      <div class="nm-row"><span>Всего</span><b id="nmTotal">0</b></div>
+      <div class="nm-row"><span>Соединение / реле</span><b id="nmRelay">—</b></div>
+      <div class="nm-row"><span>TURN за месяц (с 28-го)</span><b id="nmTurnMonth">0.0 из 500 МБ</b></div>
+      <label class="nm-toggle"><input type="checkbox" id="nmBarToggle"> Показывать счётчики поверх экрана (даже в полноэкранном режиме)</label>
+    </div>
+  </div>
 
   <!-- прозрачное меню звонков (вызывается тапом по счётчику участников) -->
   <div id="menuOverlay">
@@ -361,7 +398,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
           <button class="btn secondary sm" id="btnSaveTurn2">Сохранить TURN</button>
           <input class="field" id="pushUrl2" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px;font-family:var(--mono);font-size:12px" placeholder="Адрес пуш-сервера (Яндекс-функция)">
           <button class="btn secondary sm" id="btnSavePush2">Сохранить пуш-сервер</button>
-          <button class="btn secondary sm" id="btnIosPush" style="margin-top:8px">🔔 Фоновые звонки (iPhone)</button>
+          <button class="btn secondary sm" id="btnIosPush" style="margin-top:8px">🔔 Фоновые звонки (iPhone / ноутбук)</button>
           <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:13px;line-height:1.35;cursor:pointer"><input type="checkbox" id="forceRelay2" style="margin-top:2px"> Звонить <b>только через свой TURN</b> (надёжно между разными сетями; включать после того, как вписан свой TURN выше)</label>
         </div>
       </details>
@@ -431,30 +468,44 @@ function customTurn(){
     });
   }catch(_){ return []; }
 }
-/* Бесплатно: обычный P2P — прямое соединение + STUN + публичные TURN «на авось».
-   Свой TURN (необязательно) можно добавить в ⚙; галочка «только через свой TURN»
-   включает режим, когда медиа идёт лишь через него. */
-function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay")==="1"; }catch(_){ return false; } }
+/* Медиа: прямое P2P + STUN (бесплатно; на Wi-Fi всегда так, TURN не трогаем).
+   Ваш metered.ca TURN (METERED_TURN ниже) — резерв ТОЛЬКО на мобильной сети. */
+function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay") === "1"; }catch(_){ return false; } }
+function isTurnSrv(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /^turns?:/i.test(u); }
+/* Мобильная сеть? Android-мост -> navigator.connection -> иначе считаем не-мобильной
+   (чтобы случайно не тратить лимит TURN на Wi-Fi). */
+function onCellular(){
+  try{ if(window.Android && Android.netType){ var t=String(Android.netType()||"").toLowerCase(); if(t) return t==="cellular"||t==="mobile"; } }catch(_){}
+  try{ var c=navigator.connection||navigator.mozConnection||navigator.webkitConnection; if(c && typeof c.type==="string") return c.type==="cellular"; }catch(_){}
+  return false;
+}
 function iceConfig(){
   var ct = customTurn();
-  if (forceRelay() && ct.length){
-    return { iceServers: [ ...ct, ...ICE.iceServers.filter(function(x){ return /^stun:/i.test(Array.isArray(x.urls)?x.urls[0]:x.urls); }) ], iceTransportPolicy: "relay" };
+  if (forceRelay()){                              // ручной режим «только через TURN» (⚙)
+    var turns = [ ...ct, ...METERED_TURN ];
+    if (turns.length) return { iceServers: turns, iceTransportPolicy: "relay" };
   }
-  return { iceServers: [ ...ct, ...ICE.iceServers ] };
+  var servers = [ ...ct, ...ICE.iceServers ];     // всегда: STUN (+ свой из ⚙)
+  if (onCellular()) servers = servers.concat(METERED_TURN);  // ваш TURN — только на сотовой
+  return { iceServers: servers };
 }
 const ICE = {
   iceServers: [
     { urls: "stun:stun.l.google.com:19302" },
     { urls: "stun:stun1.l.google.com:19302" },
     { urls: "stun:stun2.l.google.com:19302" },
-    /* публичные TURN — «авось» (в РФ ненадёжны). Надёжный TURN добавьте через ⚙
-       или поднимите свой на Яндексе (см. инструкцию) — это чинит звонки между сетями. */
-    { urls: "turn:openrelay.metered.ca:80",  username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:openrelay.metered.ca:443", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turn:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
-    { urls: "turns:openrelay.metered.ca:443?transport=tcp", username: "openrelayproject", credential: "openrelayproject" },
+    { urls: "stun:stun.relay.metered.ca:80" },
   ]
 };
+/* Ваш бесплатный TURN metered.ca (500 МБ/мес). Подключается ТОЛЬКО на мобильной сети
+   и как резерв: relay-кандидаты всегда последние по приоритету, поэтому медиа идёт
+   через TURN лишь когда прямое соединение не установилось. */
+const METERED_TURN = [
+  { urls: "turn:global.relay.metered.ca:80",                 username: "3557b76837e7a6c757142518", credential: "i5H5nnqzWLqEKzQ8" },
+  { urls: "turn:global.relay.metered.ca:80?transport=tcp",   username: "3557b76837e7a6c757142518", credential: "i5H5nnqzWLqEKzQ8" },
+  { urls: "turn:global.relay.metered.ca:443",                username: "3557b76837e7a6c757142518", credential: "i5H5nnqzWLqEKzQ8" },
+  { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "3557b76837e7a6c757142518", credential: "i5H5nnqzWLqEKzQ8" },
+];
 const APP_ID = "mk-zvonok-3";
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
@@ -465,6 +516,11 @@ const RELAYS = [
   "wss://relay.snort.social",
   "wss://nostr-pub.wellorder.net",
   "wss://nostr.data.haus",
+  "wss://strfry.openhoofd.nl",
+  "wss://relay.froth.zone",
+  "wss://nostr.vulpem.com",
+  "wss://nostr.sathoarder.com",
+  "wss://relay.notoshi.win",
 ];
 const MAX_PEOPLE = 7;
 const PREFIX = "zvk2r-";
@@ -532,21 +588,28 @@ async function _subscribe(reg){
   myWpSub=sub.toJSON();
   if(lobby) lobby.sendPres();
 }
+/* Веб-пуш поддерживается на десктопе (Chrome/Edge/Firefox) и в iOS только из
+   режима «Домой» (standalone). На Android нативном пуш идёт через FCM — там
+   PushManager в WebView отсутствует, поэтому этот путь сам себя выключает. */
+function canWebPush(){
+  try{ return ("serviceWorker" in navigator) && ("PushManager" in window) && (!isIOS() || isIOSStandalone()); }catch(_){ return false; }
+}
 async function initIosPush(){   // тихо, без запроса разрешения (на загрузке)
   try{
-    if(!isIOSStandalone() || !("serviceWorker" in navigator) || !("PushManager" in window)) return;
+    if(!canWebPush()) return;
     var reg=await navigator.serviceWorker.register("sw.js");
     if(typeof Notification!=="undefined" && Notification.permission==="granted") await _subscribe(reg);
-  }catch(e){ console.warn("ios push init", e); }
+  }catch(e){ console.warn("web push init", e); }
 }
 window.__enableIosPush=async function(){   // по кнопке (нужен жест пользователя)
   try{
-    if(!isIOSStandalone()){ toast("Сначала добавьте страницу на экран «Домой» и откройте её оттуда (только iPhone)"); return; }
-    if(!("serviceWorker" in navigator) || !("PushManager" in window)){ toast("Это устройство не поддерживает фоновые пуши"); return; }
+    if(isIOS() && !isIOSStandalone()){ toast("На iPhone сначала добавьте страницу на экран «Домой» и откройте её оттуда"); return; }
+    if(!("serviceWorker" in navigator) || !("PushManager" in window)){ toast("Этот браузер не поддерживает фоновые пуши"); return; }
     var reg=await navigator.serviceWorker.register("sw.js");
-    var perm=Notification.permission; if(perm==="default") perm=await Notification.requestPermission();
+    var perm=(typeof Notification!=="undefined")?Notification.permission:"denied";
+    if(perm==="default") perm=await Notification.requestPermission();
     if(perm!=="granted"){ toast("Уведомления не разрешены"); return; }
-    await _subscribe(reg); toast("Фоновые звонки на iPhone включены");
+    await _subscribe(reg); toast("Фоновые звонки включены");
   }catch(e){ toast("Не удалось включить: "+(e&&e.message||e)); }
 };
 const LOBBY_ROOM   = "lobby-"  + SECRET;        // «прихожая»: тихо ждём входящие звонки (только сигналы)
@@ -708,7 +771,7 @@ function joinAll(s){
         resendStreamTo(ctx.peerId);
       };
       modeAct.onMessage = (d, ctx) => {
-        if (s === session && d && typeof d.audioOnly === "boolean") applyAudioOnly(d.audioOnly, false);
+        if (s === session && d && typeof d.audioOnly === "boolean") applyAudioOnly(d.audioOnly, false, d.reason);
       };
       wireRoom(rec, s);
       rooms.push(rec);
@@ -746,7 +809,7 @@ function trackPeer(id, rec){
   peers.set(id, p);
   hadPeer = true;
   rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) }, id);
-  if (audioOnly) rec.sendMode({ audioOnly: true }, id);
+  if (audioOnly) rec.sendMode({ audioOnly: true, reason: (audioCar?"car":"")+(audioTurn?"turn":"") }, id);
   /* СЕРИАЛИЗАЦИЯ ПЕРЕГОВОРОВ: чтобы видео-предложения двух сторон не сталкивались
      (из-за чего видео шло только в одну сторону), первым поток отправляет тот,
      чей идентификатор меньше; второй отвечает своим потоком после получения */
@@ -975,7 +1038,7 @@ function makeTile(id, isMe){
   const video = document.createElement("video");
   video.autoplay = true; video.playsInline = true; if (isMe) video.muted = true;
   const novid = document.createElement("div");
-  novid.className = "novid"; novid.innerHTML = '<div class="av">🎙</div>';
+  novid.className = "novid"; novid.innerHTML = '<div class="av">🎙</div><div class="avbadge"></div>';
   const name = document.createElement("div");
   name.className = "name"; name.textContent = isMe ? (myName + " (вы)") : "Участник";
   tile.append(video, novid, name);
@@ -1086,6 +1149,7 @@ function bindTrackHandlers(stream, tile){
 function refreshTileVideo(tile, stream){
   const has = stream && stream.getVideoTracks().some(t=>t.readyState==="live" && t.enabled !== false && !t.muted);
   tile.querySelector(".novid").style.display = has ? "none" : "flex";
+  try{ updateAudioBadges(); }catch(_){}
 }
 function setMemberName(id, name){
   const p = peers.get(id);
@@ -1136,23 +1200,136 @@ function startTimer(){
   timerStart = Date.now();
   timerInt = setInterval(()=>{
     const s = Math.floor((Date.now()-timerStart)/1000);
-    $("timer").textContent = String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
+    (($("timeVal"))||$("timer")).textContent = String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
   }, 500);
+  statsStart();
 }
-function stopTimer(){ clearInterval(timerInt); timerInt = null; }
+function stopTimer(){ clearInterval(timerInt); timerInt = null; statsStop(); }
+
+/* ───────── Счётчики трафика + сторож зависания (восстановление связи) ───────── */
+let statsInt = null;
+let NET = null;
+let audioCar=false, audioTurn=false;
+function netReset(){ NET = { totalRx:0,totalTx:0, prevRawRx:0,prevRawTx:0, prevTs:0, curRx:0,curTx:0, relay:"—", lastRxGrow:Date.now(), lastRxVal:0, turnFlagged:false, carFlagged:false }; audioCar=false; audioTurn=false; }
+/* в автомобиле (Android Auto)? — через нативный мост; на десктопе/iPhone — нет */
+function isCar(){ try{ if(window.Android && Android.isCar) return !!Android.isCar(); }catch(_){} return false; }
+/* месячный расход TURN: лимит metered 500 МБ, период сбрасывается 28-го числа */
+function turnMonthKey(d){ d=d||new Date(); var y=d.getFullYear(), m=d.getMonth(); if(d.getDate()<28){ m--; if(m<0){m=11;y--;} } return y+"-"+(m+1); }
+function turnMonthGet(){ try{ var o=JSON.parse(localStorage.getItem("zvk_turn_month")||"{}"); if(o.k!==turnMonthKey()){ o={k:turnMonthKey(),used:0}; localStorage.setItem("zvk_turn_month",JSON.stringify(o)); } return o; }catch(_){ return {k:turnMonthKey(),used:0}; } }
+function turnMonthAdd(b){ try{ var o=turnMonthGet(); o.used=(o.used||0)+b; localStorage.setItem("zvk_turn_month",JSON.stringify(o)); }catch(_){} }
+function updateAudioBadges(){ var t=(audioCar?"🚗":"")+(audioTurn?"📡":""); document.querySelectorAll(".tile .novid .avbadge").forEach(function(b){ b.textContent=t; b.style.display=t?"flex":"none"; }); }
+function fmtBytes(b){ b=b||0;
+  if (b>=1073741824) return (b/1073741824).toFixed(2)+" ГБ";
+  if (b>=1048576)    return (b/1048576).toFixed(1)+" МБ";
+  if (b>=1024)       return (b/1024).toFixed(0)+" КБ";
+  return Math.round(b)+" Б"; }
+function fmtRate(bps){ return fmtBytes(bps)+"/с"; }
+async function netCollect(){
+  let rx=0, tx=0, relay=NET?NET.relay:"—";
+  for (const [id,p] of peers){
+    let pc=null;
+    try{ const pcs=p.rec.room.getPeers?p.rec.room.getPeers():null; pc=pcs&&pcs[id]; }catch(_){}
+    if (!pc||!pc.getStats) continue;
+    let rep; try{ rep=await pc.getStats(); }catch(_){ continue; }
+    let selPair=null;
+    rep.forEach(st=>{
+      if (st.type==="inbound-rtp" && typeof st.bytesReceived==="number") rx+=st.bytesReceived;
+      else if (st.type==="outbound-rtp" && typeof st.bytesSent==="number") tx+=st.bytesSent;
+      else if (st.type==="transport" && st.selectedCandidatePairId) selPair=st.selectedCandidatePairId;
+    });
+    rep.forEach(st=>{
+      if (st.type==="candidate-pair" && (st.id===selPair || st.nominated || st.selected) && (st.state==="succeeded"||st.selected||st.nominated)){
+        const loc = rep.get ? rep.get(st.localCandidateId) : null;
+        if (loc && loc.candidateType){
+          relay = loc.candidateType==="relay" ? "через TURN-реле" : (loc.candidateType==="srflx"||loc.candidateType==="prflx"?"P2P (через NAT)":"P2P напрямую"); }
+      }
+    });
+  }
+  return { rx, tx, relay };
+}
+function netHeal(){
+  let n=0;
+  for (const [id,p] of peers){
+    let pc=null;
+    try{ const pcs=p.rec.room.getPeers?p.rec.room.getPeers():null; pc=pcs&&pcs[id]; }catch(_){}
+    try{ if(pc&&pc.restartIce) pc.restartIce(); }catch(_){}
+    try{ p.sentStream=false; sendStreamTo(p,id); if(p.rec.sendNeed) p.rec.sendNeed(id); n++; }catch(_){}
+  }
+  if (n) toast("Связь подвисла — восстанавливаю…");
+}
+function netTick(){
+  if (!NET) return;
+  netCollect().then(d=>{
+    if (!NET) return;
+    const now=Date.now();
+    const dRx=d.rx-NET.prevRawRx, dTx=d.tx-NET.prevRawTx;
+    if (dRx>0) NET.totalRx+=dRx;
+    if (dTx>0) NET.totalTx+=dTx;
+    if (d.relay==="через TURN-реле"){ var addb=(dRx>0?dRx:0)+(dTx>0?dTx:0); if(addb>0) turnMonthAdd(addb); }
+    if (NET.prevTs){ const dt=(now-NET.prevTs)/1000; if(dt>0){ NET.curRx=dRx>0?dRx/dt:0; NET.curTx=dTx>0?dTx/dt:0; } }
+    NET.prevRawRx=d.rx; NET.prevRawTx=d.tx; NET.prevTs=now; NET.relay=d.relay;
+    // авто «только звук»: через TURN на мобильной (экономия 500 МБ) ИЛИ в автомобиле (Android Auto)
+    if (onCellular() && d.relay==="через TURN-реле" && !NET.turnFlagged){
+      NET.turnFlagged=true; try{ applyAudioOnly(true,true,"turn"); }catch(_){}
+      toast("Связь через реле — оставил только звук для экономии трафика");
+    }
+    if (isCar() && !NET.carFlagged){
+      NET.carFlagged=true; try{ applyAudioOnly(true,true,"car"); }catch(_){}
+      toast("Звонок в автомобиле — оставил только звук");
+    }
+    if (peers.size>0){
+      if (d.rx>NET.lastRxVal+3000){ NET.lastRxVal=d.rx; NET.lastRxGrow=now; }
+      else if (NET.lastRxGrow && now-NET.lastRxGrow>12000){ NET.lastRxGrow=now; netHeal(); }
+    } else { NET.lastRxGrow=now; NET.lastRxVal=d.rx; }
+    netRender();
+  }).catch(()=>{});
+}
+function netRender(){
+  if (!NET) return;
+  const np=$("netPill"); if(np) np.textContent="⇅ "+fmtBytes(NET.totalRx+NET.totalTx);
+  const ctp=$("connType"); if(ctp) ctp.textContent=NET.relay;
+  const sb=$("statsBar");
+  if (sb && sb.classList.contains("on"))
+    sb.textContent="↓"+fmtBytes(NET.totalRx)+"  ↑"+fmtBytes(NET.totalTx)+"  •  "+fmtRate(NET.curRx)+"↓ "+fmtRate(NET.curTx)+"↑";
+  const ov=$("netOverlay");
+  if (ov && ov.classList.contains("show")){
+    const dur=timerStart?Math.max(1,(Date.now()-timerStart)/1000):1;
+    const set=(idn,v)=>{ const e=$(idn); if(e) e.textContent=v; };
+    set("nmCurRx",fmtRate(NET.curRx)); set("nmCurTx",fmtRate(NET.curTx));
+    set("nmAvgRx",fmtRate(NET.totalRx/dur)); set("nmAvgTx",fmtRate(NET.totalTx/dur));
+    set("nmRx",fmtBytes(NET.totalRx)); set("nmTx",fmtBytes(NET.totalTx));
+    set("nmTotal",fmtBytes(NET.totalRx+NET.totalTx)); set("nmRelay",NET.relay);
+    set("nmTurnMonth",(turnMonthGet().used/1048576).toFixed(1)+" из 500 МБ");
+  }
+}
+function statsStart(){ netReset(); if(statsInt) return; statsInt=setInterval(netTick,1500); }
+function statsStop(){ clearInterval(statsInt); statsInt=null; }
+function openNetMenu(){ const ov=$("netOverlay"); if(ov){ ov.classList.add("show"); netRender(); } }
+function closeNetMenu(){ const ov=$("netOverlay"); if(ov) ov.classList.remove("show"); }
+function applyStatsBarPref(){ try{ const on=localStorage.getItem("zvk_stats_bar")==="1"; const sb=$("statsBar"); if(sb) sb.classList.toggle("on",on); const cb=$("nmBarToggle"); if(cb) cb.checked=on; }catch(_){} }
+function netWire(){
+  const np=$("netPill"); if(np) np.addEventListener("click",openNetMenu);
+  const nc=$("netClose"); if(nc) nc.addEventListener("click",closeNetMenu);
+  const nb=$("netBackdrop"); if(nb) nb.addEventListener("click",closeNetMenu);
+  const cb=$("nmBarToggle"); if(cb) cb.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_stats_bar",cb.checked?"1":"0"); }catch(_){} applyStatsBarPref(); });
+  applyStatsBarPref();
+}
 
 /* ───────────── Общий аудио-режим (синхронно у всех) ───────────── */
-function applyAudioOnly(on, broadcast){
-  if (audioOnly === on && !broadcast){ return; }
+function applyAudioOnly(on, broadcast, reason){
+  if (audioOnly === on && !broadcast && reason===undefined){ updateAudioBadges(); return; }
   audioOnly = on;
+  if (!on){ audioCar=false; audioTurn=false; }
+  else if (reason){ if(reason.indexOf("car")>=0) audioCar=true; if(reason.indexOf("turn")>=0) audioTurn=true; }
   if (localStream) localStream.getVideoTracks().forEach(t=> t.enabled = !on);
   const me = document.querySelector('.tile[data-me="1"]');
   if (me) refreshTileVideo(me, localStream);
-  updateModeBtn(); updateCtlIcons();
+  updateModeBtn(); updateCtlIcons(); updateAudioBadges();
   if (broadcast){
-    for (const rec of rooms) rec.sendMode({ audioOnly: on });
+    const rs=(audioCar?"car":"")+(audioTurn?"turn":"");
+    for (const rec of rooms) rec.sendMode({ audioOnly: on, reason: rs });
     toast(on ? "🎙 Аудио-режим включён для всех" : "📹 Видео включено для всех");
-  } else {
+  } else if (reason===undefined){
     toast(on ? "🎙 Собеседник перевёл звонок в аудио-режим" : "📹 Собеседник вернул видео");
   }
 }
@@ -1971,6 +2148,7 @@ function wireUI(){
   const pu=$("pushUrl2");
   if(pu){ try{ pu.value=localStorage.getItem("zvk_push_url")||""; }catch(_){} bind("btnSavePush2",()=>{ try{ localStorage.setItem("zvk_push_url",(pu.value||"").trim()); }catch(_){} const sv=$("btnSavePush2"); if(sv){ sv.textContent="✓ Сохранено"; setTimeout(()=>sv.textContent="Сохранить пуш-сервер",1600);} }); }
   bind("btnIosPush",()=>{ if(window.__enableIosPush) window.__enableIosPush(); });
+  try{ netWire(); }catch(_){}
   const fr=$("forceRelay2");
   if(fr){ try{ fr.checked = forceRelay(); }catch(_){} fr.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_force_relay", fr.checked?"1":"0"); }catch(_){} const t=$("forceRelayHint"); }); }
 }
