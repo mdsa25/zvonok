@@ -718,6 +718,7 @@ async function enterRoom(name, video){
   }
 
   inRoom = true;
+  try{ if(window.Android && Android.setInCall) Android.setInCall(true); }catch(_){}
   const s = ++session;
   peers = new Map();
   rememberRoom(name);
@@ -1566,6 +1567,7 @@ window.setPipMode = function(on){
   if (me) me.classList.toggle("onlyme-hide", !!on && peers.size > 0);
   if (!on) pokeUI();
 };
+window.__setPip = window.setPipMode;   // вызывается из MainActivity при входе/выходе из PiP
 
 /* ───────────── Выход ─────────────
    Выход = чистая перезагрузка страницы: каждый вход гарантированно «с нуля»,
@@ -1573,6 +1575,7 @@ window.setPipMode = function(on){
 function leaveRoom(msg, isErr){
   if (!inRoom && !rooms.length){ show("scr-home"); return; }
   inRoom = false;
+  try{ if(window.Android && Android.setInCall) Android.setInCall(false); }catch(_){}
   session++;
   clearTimeout(uiTimer);
   try{
