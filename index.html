@@ -37,6 +37,9 @@
   .logo{font-size:14px;letter-spacing:.22em;text-transform:uppercase;color:var(--dim);margin:18px 0 4px}
   .h1{font-size:26px;font-weight:700;margin:0 0 22px;text-align:center;line-height:1.25}
   .h1 em{font-style:normal;color:var(--accent)}
+  #scr-home .card{padding:9px 12px !important;border-radius:14px}
+  #contactList{display:flex;flex-direction:column;gap:6px}
+  #scr-home .btn.wide{padding:10px 12px;font-size:14px}
   .card{background:var(--panel);border:1px solid var(--line);border-radius:18px;
     padding:18px;width:100%;max-width:440px;margin-bottom:14px}
   .card h2{font-size:13px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin:0 0 12px;font-weight:600}
@@ -110,6 +113,8 @@
     .topbar{gap:6px}
     .topbar .pill{padding:5px 10px;font-size:12.5px}
   }
+  *{-webkit-tap-highlight-color:transparent}
+  button,.pill,.ctl,.tile,.inc-btn,summary,.menu-x,.card,.novid,.avbadge{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
   .pill{background:rgba(16,21,28,.65);backdrop-filter:blur(6px);border-radius:999px;
     padding:6px 14px;font-size:14px;color:#e9eef5;border:none}
   .pill.t{font-family:var(--mono)}
@@ -219,6 +224,7 @@ body.light .btn.secondary{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.10
 .settings>summary{list-style:none;cursor:pointer;font-size:20px;opacity:.7;padding:2px 8px;border-radius:10px}
 .settings>summary::-webkit-details-marker{display:none}
 .settings[open]>summary{background:rgba(255,255,255,.10)}
+.settings-body.float{display:block;z-index:220}
 .settings-body{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(88vw,300px);max-height:min(72vh,540px);overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;padding:12px;border-radius:16px;z-index:40;background:rgba(18,26,40,.97);backdrop-filter:blur(16px);border:1px solid rgba(255,255,255,.10);box-shadow:0 16px 40px rgba(0,0,0,.5)}
 body.light .settings-body{background:rgba(255,255,255,.98)}
 .contactrow{display:flex;align-items:center;gap:12px;padding:11px 12px;border-radius:16px;margin-bottom:9px;background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);transition:background .15s}
@@ -371,6 +377,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
       <div class="menu-title">Кому позвонить</div>
       <div id="menuList"></div>
       <button class="btn green wide" id="menuGeneral" style="margin-top:6px">📞 Общий созвон</button>
+      <button class="btn wide" id="menuSettings" style="margin-top:6px">⚙ Настройки</button>
       <button class="btn wide" id="menuBack" style="margin-top:6px">↩ Вернуться в звонок</button>
       <div class="menu-note" id="menuNote"></div>
     </div>
@@ -407,7 +414,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
           <input class="field" id="pushUrl2" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px;font-family:var(--mono);font-size:12px" placeholder="Адрес пуш-сервера (Яндекс-функция)">
           <button class="btn secondary sm" id="btnSavePush2">Сохранить пуш-сервер</button>
           <button class="btn secondary sm" id="btnIosPush" style="margin-top:8px">🔔 Фоновые звонки (iPhone / ноутбук)</button>
-          <label style="display:flex;align-items:flex-start;gap:8px;margin-top:12px;font-size:13px;line-height:1.35;cursor:pointer"><input type="checkbox" id="forceRelay2" style="margin-top:2px"> Звонить <b>только через свой TURN</b> (надёжно между разными сетями; включать после того, как вписан свой TURN выше)</label>
+          <button class="btn wide sm" id="setClose" style="margin-top:10px">Закрыть</button>
         </div>
       </details>
     </div>
@@ -479,7 +486,7 @@ function customTurn(){
 }
 /* Медиа: прямое P2P + STUN (бесплатно; на Wi-Fi всегда так, TURN не трогаем).
    Ваш ExpressTURN (EXPRESS_TURN ниже) — резерв, когда прямое не удалось. */
-function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay") === "1"; }catch(_){ return false; } }
+function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay")==="1" || sessionStorage.getItem("zvk_auto_relay")==="1"; }catch(_){ return false; } }
 function isTurnSrv(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /^turns?:/i.test(u); }
 /* Мобильная сеть? Android-мост -> navigator.connection -> иначе считаем не-мобильной
    (чтобы случайно не тратить лимит TURN на Wi-Fi). */
@@ -494,19 +501,20 @@ function iceConfig(){
     /* строго TCP-подключение к TURN: сотовые операторы (Билайн) часто пропускают
        короткие проверочные UDP-пакеты, но душат UDP-поток самого звонка */
     var tcpOnly = EXPRESS_TURN.filter(function(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /transport=tcp/i.test(u); });
-    var turns = [ ...ct, ...(tcpOnly.length?tcpOnly:EXPRESS_TURN), ...METERED_TLS ];
+    var turns = [ ...ct, ...(tcpOnly.length?tcpOnly:EXPRESS_TURN) ];
     if (turns.length) return { iceServers: turns, iceTransportPolicy: "relay" };
   }
   /* TURN включён ВСЕГДА (не только на сотовой): пул соединений создаётся один раз
      при старте (в лобби), и конфиг «по сети» фиксировался навсегда — из-за этого
      звонок сотовая↔сотовая оставался без TURN. Relay-кандидаты имеют низший
      приоритет: на Wi-Fi медиа идёт напрямую, лимит 500 МБ не тратится. */
-  var turnSrv = EXPRESS_TURN;
+  /* Wi-Fi: без TURN вовсе — звонок Wi-Fi<->Wi-Fi не должен ходить через реле.
+     Сотовая: ExpressTURN строго по TCP (UDP-поток операторы душат). */
   if (onCellular()){
     var tcp = EXPRESS_TURN.filter(function(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /transport=tcp/i.test(u); });
-    if (tcp.length) turnSrv = tcp.concat(METERED_TLS);   // сотовые: реле по TCP + TLS-резерв на 443
+    return { iceServers: [ ...ct, ...ICE.iceServers, ...(tcp.length?tcp:EXPRESS_TURN) ] };
   }
-  return { iceServers: [ ...ct, ...ICE.iceServers, ...turnSrv ] };
+  return { iceServers: [ ...ct, ...ICE.iceServers ] };
 }
 const ICE = {
   iceServers: [
@@ -523,11 +531,7 @@ const EXPRESS_TURN = [
   { urls: "turn:free.expressturn.com:3478",               username: "000000002098439472", credential: "HI/5DN+L3tivXtjrr5MI+dZ5tBY=" },
   { urls: "turn:free.expressturn.com:3478?transport=tcp", username: "000000002098439472", credential: "HI/5DN+L3tivXtjrr5MI+dZ5tBY=" },
 ];
-/* Резерв для сотовых с жёстким DPI (Билайн): TLS-реле на 443 — неотличимо от HTTPS.
-   metered, 500 МБ/мес; используется только если ExpressTURN не смог. */
-const METERED_TLS = [
-  { urls: "turns:global.relay.metered.ca:443?transport=tcp", username: "3557b76837e7a6c757142518", credential: "i5H5nnqzWLqEKzQ8" },
-];
+
 const APP_ID = "mk-zvonok-3";
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
@@ -932,6 +936,8 @@ function watchConnection(p, id){
               if (sess !== session || peers.get(id) !== p) return;
               if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed"){
                 try{ pc.restartIce && pc.restartIce(); }catch(_){}
+                p.iceFails=(p.iceFails||0)+1;
+                if (p.iceFails>=2) triggerAutoRelay();   // прямое не лечится — уходим через реле
                 resendStreamTo(id);
               }
             }, grace);
@@ -1294,6 +1300,8 @@ function netTick(){
     if (dRx>0) NET.totalRx+=dRx;
     if (dTx>0) NET.totalTx+=dTx;
     if (d.relay==="TURN"){ var addb=(dRx>0?dRx:0)+(dTx>0?dTx:0); if(addb>0) turnMonthAdd(addb); }
+    if (dRx>0) NET.lastRxGrow=now;
+    else if (inRoom && peers.size>0 && NET.relay!=="TURN" && now-NET.lastRxGrow>12000){ NET.lastRxGrow=now; triggerAutoRelay(); }
     if (NET.prevTs){ const dt=(now-NET.prevTs)/1000; if(dt>0){ NET.curRx=dRx>0?dRx/dt:0; NET.curTx=dTx>0?dTx/dt:0; } }
     NET.prevRawRx=d.rx; NET.prevRawTx=d.tx; NET.prevTs=now; NET.relay=d.relay;
     // один в комнате 90 сек — выходим сами, чтобы не висело «идёт звонок»
@@ -1335,6 +1343,17 @@ function statsStop(){ clearInterval(statsInt); statsInt=null; }
 function openNetMenu(){ const ov=$("netOverlay"); if(ov){ ov.classList.add("show"); netRender(); } }
 function closeNetMenu(){ const ov=$("netOverlay"); if(ov) ov.classList.remove("show"); }
 function applyStatsBarPref(){ try{ const on=localStorage.getItem("zvk_stats_bar")==="1"; const sb=$("statsBar"); if(sb) sb.classList.toggle("on",on); const sc=$("scr-call"); if(sc) sc.classList.toggle("statson",on); const cb=$("nmBarToggle"); if(cb) cb.checked=on; }catch(_){} }
+let autoRelayFired=false;
+function triggerAutoRelay(){
+  if (autoRelayFired) return;
+  try{ if (sessionStorage.getItem("zvk_auto_relay")==="1") return; }catch(_){}
+  autoRelayFired = true;
+  try{ sessionStorage.setItem("zvk_auto_relay","1"); }catch(_){}
+  toast("Прямое соединение не пошло — переключаюсь через реле…");
+  const v = (withVideo && !audioOnly) ? "1" : "0";
+  const nm = callLabel ? ("&name="+encodeURIComponent(callLabel)) : "";
+  setTimeout(()=>{ try{ location.replace(location.pathname+"?autojoin=1&video="+v+nm); }catch(_){ location.reload(); } }, 700);
+}
 async function probeTurn(servers, ms){
   let ok=false, pc=null;
   try{
@@ -1471,6 +1490,18 @@ async function flipCam(){
   if (btn.dataset.busy) return;
   btn.dataset.busy = "1";
   try{
+    if (isIOS()){
+      const cur = facing;
+      facing = (facing === "user") ? "environment" : "user";
+      const otI = localStream.getVideoTracks()[0];
+      if (otI){ try{ otI.stop(); }catch(_){} }
+      let nsI = null;
+      try{ nsI = await gumTimeout({ video:{ facingMode:{ exact: facing } }, audio:false }, 7000); }catch(_){}
+      if (!nsI){ try{ nsI = await gumTimeout({ video:{ facingMode: facing }, audio:false }, 7000); }catch(_){} }
+      if (!nsI){ facing = cur; try{ nsI = await gumTimeout({ video:{ facingMode: facing }, audio:false }, 7000); }catch(_){} }
+      if (nsI) await applyNewCamera(nsI); else toast("Не удалось переключить камеру");
+      return;
+    }
     await buildAllCams();
     const ot = localStream.getVideoTracks()[0];
     const curId = (ot && ot.getSettings) ? (ot.getSettings().deviceId || null) : null;
@@ -1643,6 +1674,7 @@ window.__setPip = window.setPipMode;   // вызывается из MainActivity
 function leaveRoom(msg, isErr){
   if (!inRoom && !rooms.length){ show("scr-home"); return; }
   inRoom = false;
+  try{ sessionStorage.removeItem("zvk_auto_relay"); }catch(_){}   // новый звонок снова начнёт с прямого
   try{ if(window.Android && Android.setInCall) Android.setInCall(false); }catch(_){}
   session++;
   clearTimeout(uiTimer);
@@ -1706,6 +1738,9 @@ async function decChunk(buf){
   const pt = await crypto.subtle.decrypt({name:"AES-GCM", iv}, key, ct);
   return pt;
 }
+let setParent=null;
+function openSettingsModal(){ const sb=document.querySelector(".settings-body"); if(!sb) return; if(!setParent) setParent=sb.parentNode; if(sb.parentNode!==document.body) document.body.appendChild(sb); sb.classList.add("float"); }
+function closeSettingsModal(){ const sb=document.querySelector(".settings-body"); if(!sb) return; sb.classList.remove("float"); if(setParent && sb.parentNode===document.body) setParent.appendChild(sb); }
 function xid(){ return Math.random().toString(36).slice(2) + Date.now().toString(36); }
 function fmtSize(b){ return b < 1048576 ? (b/1024).toFixed(0)+" КБ" : (b/1048576).toFixed(1)+" МБ"; }
 
@@ -2235,6 +2270,8 @@ function wireUI(){
   if(pu){ try{ pu.value=localStorage.getItem("zvk_push_url")||""; }catch(_){} bind("btnSavePush2",()=>{ try{ localStorage.setItem("zvk_push_url",(pu.value||"").trim()); }catch(_){} const sv=$("btnSavePush2"); if(sv){ sv.textContent="✓ Сохранено"; setTimeout(()=>sv.textContent="Сохранить пуш-сервер",1600);} }); }
   bind("btnIosPush",()=>{ if(window.__enableIosPush) window.__enableIosPush(); });
   bind("btnExit",()=>{ try{ if(window.Android&&Android.exitApp){ Android.exitApp(); return; } }catch(_){} try{ window.close(); }catch(_){} });
+  bind("menuSettings",()=>{ openSettingsModal(); });
+  bind("setClose",()=>{ const sb=document.querySelector(".settings-body"); if(sb&&sb.classList.contains("float")) closeSettingsModal(); else { const d=document.querySelector("#scr-home details"); if(d) d.open=false; } });
   try{ netWire(); }catch(_){}
   const fr=$("forceRelay2");
   if(fr){ try{ fr.checked = forceRelay(); }catch(_){} fr.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_force_relay", fr.checked?"1":"0"); }catch(_){}
