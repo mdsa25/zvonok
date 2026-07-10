@@ -497,24 +497,21 @@ function onCellular(){
 }
 function iceConfig(){
   var ct = customTurn();
-  if (forceRelay()){                              // ручной режим «только через TURN» (⚙)
-    /* строго TCP-подключение к TURN: сотовые операторы (Билайн) часто пропускают
-       короткие проверочные UDP-пакеты, но душат UDP-поток самого звонка */
-    var tcpOnly = EXPRESS_TURN.filter(function(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /transport=tcp/i.test(u); });
-    var turns = [ ...ct, ...(tcpOnly.length?tcpOnly:EXPRESS_TURN) ];
+  var tcp = EXPRESS_TURN.filter(function(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /transport=tcp/i.test(u); });
+  if (forceRelay()){                              // авто/ручной режим «только через реле»
+    /* строго TCP: UDP-поток режут и операторы (Билайн), и часть Wi-Fi (КСА) */
+    var turns = [ ...ct, ...(tcp.length?tcp:EXPRESS_TURN) ];
     if (turns.length) return { iceServers: turns, iceTransportPolicy: "relay" };
   }
-  /* TURN включён ВСЕГДА (не только на сотовой): пул соединений создаётся один раз
-     при старте (в лобби), и конфиг «по сети» фиксировался навсегда — из-за этого
-     звонок сотовая↔сотовая оставался без TURN. Relay-кандидаты имеют низший
-     приоритет: на Wi-Fi медиа идёт напрямую, лимит 500 МБ не тратится. */
-  /* Wi-Fi: без TURN вовсе — звонок Wi-Fi<->Wi-Fi не должен ходить через реле.
-     Сотовая: ExpressTURN строго по TCP (UDP-поток операторы душат). */
+  /* Прямое соединение в приоритете: relay-кандидаты имеют низший приоритет и
+     включаются, только если прямое не прошло. Но TURN-по-TCP держим ЗАПАСНЫМ
+     на ЛЮБОЙ сети — некоторые провайдеры (Wi-Fi в КСА, сотовые с DPI) режут UDP,
+     и тогда прямое/STUN/UDP-реле невозможны, остаётся единственный путь — реле
+     по TCP. На нормальной сети реле не задействуется. */
   if (onCellular()){
-    var tcp = EXPRESS_TURN.filter(function(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /transport=tcp/i.test(u); });
-    return { iceServers: [ ...ct, ...ICE.iceServers, ...(tcp.length?tcp:EXPRESS_TURN) ] };
+    return { iceServers: [ ...ct, ...ICE.iceServers, ...(tcp.length?tcp:EXPRESS_TURN) ] };   // сотовые душат UDP -> реле по TCP
   }
-  return { iceServers: [ ...ct, ...ICE.iceServers ] };
+  return { iceServers: [ ...ct, ...ICE.iceServers, ...EXPRESS_TURN ] };   // Wi-Fi: прямое + запасное реле (UDP и TCP)
 }
 const ICE = {
   iceServers: [
