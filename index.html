@@ -486,7 +486,8 @@ function customTurn(){
 }
 /* Медиа: прямое P2P + STUN (бесплатно; на Wi-Fi всегда так, TURN не трогаем).
    Ваш ExpressTURN (EXPRESS_TURN ниже) — резерв, когда прямое не удалось. */
-function forceRelay(){ try{ return localStorage.getItem("zvk_force_relay")==="1" || sessionStorage.getItem("zvk_auto_relay")==="1"; }catch(_){ return false; } }
+function forceRelay(){ try{ return sessionStorage.getItem("zvk_auto_relay")==="1"; }catch(_){ return false; } }
+try{ localStorage.removeItem("zvk_force_relay"); }catch(_){}   // рудимент старой галочки — мог намертво блокировать связь
 function isTurnSrv(x){ var u=Array.isArray(x.urls)?x.urls[0]:x.urls; return /^turns?:/i.test(u); }
 /* Мобильная сеть? Android-мост -> navigator.connection -> иначе считаем не-мобильной
    (чтобы случайно не тратить лимит TURN на Wi-Fi). */
@@ -1375,13 +1376,14 @@ async function probeTurn(servers, ms){
   return ok;
 }
 async function testTurn(){
-  const btn=$("nmTurnTest"); if(btn){ btn.disabled=true; btn.textContent="Проверяю (до 12 сек)…"; }
-  const ALLT = SELF_TURN.concat(EXPRESS_TURN);
-  const udpSrv = ALLT.filter(x=>!/transport=tcp/i.test(Array.isArray(x.urls)?x.urls[0]:x.urls));
-  const tcpSrv = ALLT.filter(x=> /transport=tcp/i.test(Array.isArray(x.urls)?x.urls[0]:x.urls));
-  const u = await probeTurn(udpSrv, 6000);
-  const t = await probeTurn(tcpSrv, 6000);
-  const txt = "UDP "+(u?"✅":"❌")+" • TCP "+(t?"✅":"❌");
+  const btn=$("nmTurnTest"); if(btn){ btn.disabled=true; btn.textContent="Проверяю (до 20 сек)…"; }
+  const isTcp = x=>/transport=tcp/i.test(Array.isArray(x.urls)?x.urls[0]:x.urls);
+  const su = await probeTurn(SELF_TURN.filter(x=>!isTcp(x)), 5000);
+  const st = await probeTurn(SELF_TURN.filter(isTcp), 5000);
+  const eu = await probeTurn(EXPRESS_TURN.filter(x=>!isTcp(x)), 5000);
+  const et = await probeTurn(EXPRESS_TURN.filter(isTcp), 5000);
+  const u = su||eu, t = st||et;
+  const txt = "Свой: UDP "+(su?"✅":"❌")+" TCP "+(st?"✅":"❌")+" • Резерв: UDP "+(eu?"✅":"❌")+" TCP "+(et?"✅":"❌");
   const el=$("nmTurnState"); if(el) el.textContent = txt;
   toast("TURN: "+txt+((!u&&!t)?" — из этой сети реле недоступно":""));
   if(btn){ btn.disabled=false; btn.textContent="Проверить TURN-реле"; }
