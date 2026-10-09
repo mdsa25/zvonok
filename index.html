@@ -101,6 +101,7 @@
   .tile .novid .av{width:64px;height:64px;border-radius:50%;background:#222c3d;
     border:2px solid #2e3a4e;display:flex;align-items:center;justify-content:center;font-size:30px}
   .tile.me video{transform:scaleX(-1)}
+  .tile.fit video{object-fit:contain;background:#000}
   .tile.me.rear video{transform:none}
   #waitOverlay{position:absolute;inset:0;z-index:3;display:flex;flex-direction:column;gap:14px;
     align-items:center;justify-content:center;text-align:center;background:rgba(16,21,28,.78);padding:24px;color:#e9eef5}
@@ -214,6 +215,20 @@ body.light .btn.secondary{background:rgba(0,0,0,.04);border-color:rgba(0,0,0,.10
 .btn.secondary:active{background:rgba(255,255,255,.12)}
 .btn.sm{padding:11px 13px;font-size:14px;border-radius:13px}
 .btn.wide{width:100%;padding:16px;font-size:17px}
+/* «Общий созвон» — в самом низу, отдельно от контактов, чтобы не нажать случайно */
+.btn.callall{margin-top:22px;position:sticky;bottom:0;z-index:2}
+.menu-panel{display:flex;flex-direction:column;overflow:hidden !important}
+.menu-scroll{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+.menu-panel .btn.callall{position:static;flex:none;margin-top:12px}
+#scr-contacts{justify-content:flex-start !important}
+#scr-contacts .standby{margin:auto 0;display:flex;flex-direction:column;max-height:100%;min-height:0;flex:none}
+.standby-scroll{flex:1 1 auto;min-height:0;overflow:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain;margin:0 -4px;padding:0 4px}
+#scr-contacts .btn.callall{position:static;flex:none;margin-top:16px}
+#scr-contacts .menu-head #meLine{flex:1 1 auto;min-width:0}
+.app-x{flex:none;width:48px;height:48px;margin-left:6px;border:none;border-radius:50%;cursor:pointer;padding:0;
+  background:#e5484d;display:flex;align-items:center;justify-content:center;
+  box-shadow:0 6px 16px rgba(229,72,77,.4);-webkit-tap-highlight-color:transparent;transition:transform .06s}
+.app-x:active{transform:scale(.9)}
 #scr-contacts{align-items:center;justify-content:center}
 .standby{position:relative;width:100%;max-width:440px;padding:20px;border-radius:24px}
 .menu-head{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px}
@@ -374,12 +389,14 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
         <span id="menuMe">Я — …</span>
         <button class="menu-x" id="menuClose">✕</button>
       </div>
-      <div class="menu-title">Кому позвонить</div>
-      <div id="menuList"></div>
-      <button class="btn green wide" id="menuGeneral" style="margin-top:6px">📞 Общий созвон</button>
-      <button class="btn wide" id="menuSettings" style="margin-top:6px">⚙ Настройки</button>
-      <button class="btn wide" id="menuBack" style="margin-top:6px">↩ Вернуться в звонок</button>
-      <div class="menu-note" id="menuNote"></div>
+      <div class="menu-scroll">
+        <div class="menu-title">Кому позвонить</div>
+        <div id="menuList"></div>
+        <div class="menu-note" id="menuNote"></div>
+        <button class="btn wide" id="menuSettings" style="margin-top:6px">⚙ Настройки</button>
+        <button class="btn wide" id="menuBack" style="margin-top:6px">↩ Вернуться в звонок</button>
+      </div>
+      <button class="btn green wide callall" id="menuGeneral">📞 Общий созвон</button>
     </div>
   </div>
 </div>
@@ -408,6 +425,8 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
             <button class="btn secondary sm" id="btnTheme2">🌗 Тема</button>
           </div>
           <button class="btn secondary sm" id="btnReSlot" style="margin-top:8px">🔁 Я — другой контакт</button>
+          <button class="btn secondary sm" id="btnRingtone" style="margin-top:8px;flex-direction:column;gap:2px">🔔 Мелодия звонка<span id="ringName" style="font-size:12px;font-weight:500;opacity:.75">…</span></button>
+          <label class="nm-toggle" id="carAutoRow" style="margin-top:10px"><input type="checkbox" id="carAuto"> 🚗 В машине отвечать самому через 5 секунд (только звук)</label>
           <textarea class="field" id="turnCfg2" rows="2" style="margin-top:10px;font-family:var(--mono);font-size:13px"
             placeholder="Свой TURN: turn:адрес:порт|логин|пароль"></textarea>
           <button class="btn secondary sm" id="btnSaveTurn2">Сохранить TURN</button>
@@ -417,13 +436,15 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
           <button class="btn wide sm" id="setClose" style="margin-top:10px">Закрыть</button>
         </div>
       </details>
+      <button class="app-x" id="btnExit" title="Закрыть приложение" aria-label="Закрыть приложение"><svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="#fff" stroke-width="3.2" stroke-linecap="round" fill="none"/></svg></button>
     </div>
-    <div class="menu-title">Контакты</div>
-    <div id="contactList"></div>
-    <button class="btn green wide" id="btnCallAll" style="margin-top:14px">📞 Общий созвон</button>
-    <button class="btn wide" id="btnReturnRoom" style="margin-top:8px">↩ Вернуться в комнату</button>
-    <div class="menu-note" id="contactsStatus"></div>
-    <button class="btn wide" id="btnExit" style="margin-top:8px">⏻ Закрыть приложение</button>
+    <div class="standby-scroll">
+      <div class="menu-title">Контакты</div>
+      <div id="contactList"></div>
+      <div class="menu-note" id="contactsStatus"></div>
+      <button class="btn wide" id="btnReturnRoom" style="margin-top:8px;display:none">↩ Вернуться в разговор</button>
+    </div>
+    <button class="btn green wide callall" id="btnCallAll">📞 Общий созвон</button>
   </div>
   <div id="installHint" class="glass" style="display:none;margin-top:14px;max-width:440px;width:100%;padding:16px;background:rgba(42,109,244,.85);color:#fff;border-radius:18px">
     <b style="font-size:16px">📲 Установите на экран «Домой»</b>
@@ -537,6 +558,7 @@ const EXPRESS_TURN = [
 ];
 
 const APP_ID = "mk-zvonok-3";
+const PROTO = 2;   // v60: личные звонки — в отдельной комнате пары, общий созвон — в общей
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
   "wss://nos.lol",
@@ -582,8 +604,11 @@ function saveTokStore(o){ try{ localStorage.setItem("zvk_tokens", JSON.stringify
 function tokKey(v){ try{ return (v&&typeof v==="object")?(v.endpoint||JSON.stringify(v)):String(v); }catch(_){ return String(v); } }
 function cacheToken(slot, token, plat){
   if(!slot || !token) return;
-  var o=loadTokStore(); var key=String(slot); var arr=Array.isArray(o[key])?o[key]:[];
+  var o=loadTokStore(); var key=String(slot);
   var nk=tokKey(token);
+  /* устройство сменило «кто я» — убираем его токен из старого контакта (иначе звонок приходил не тому) */
+  for(var k in o){ if(k!==key && Array.isArray(o[k])){ o[k]=o[k].filter(function(x){ return x && x.token && tokKey(x.token)!==nk; }); if(!o[k].length) delete o[k]; } }
+  var arr=Array.isArray(o[key])?o[key]:[];
   arr=arr.filter(function(x){ return x && x.token && tokKey(x.token)!==nk; });
   arr.unshift({token:token, plat:plat||"android", ts:Date.now()});
   if(arr.length>6) arr=arr.slice(0,6);
@@ -644,7 +669,20 @@ window.__enableIosPush=async function(){   // по кнопке (нужен же
 };
 const LOBBY_ROOM   = "lobby-"  + SECRET;        // «прихожая»: тихо ждём входящие звонки (только сигналы)
 function pairRoom(a,b){ const lo=Math.min(a,b), hi=Math.max(a,b); return "p-"+lo+"-"+hi+"-"+SECRET; }
-function defaultNames(){ const a=[]; for(let i=1;i<=SLOTS;i++) a.push("Контакт "+i); return a; }
+/* версии у контактов: 2 — знает комнаты пар; 1 — старая версия (всё в общей комнате); 0 — неизвестно */
+function loadProto(){ try{ const o=JSON.parse(localStorage.getItem("zvk_proto")||"{}"); return (o&&typeof o==="object")?o:{}; }catch(_){ return {}; } }
+function setProto(slot,v){ try{ if(!slot) return; const o=loadProto(); if(o[slot]!==v){ o[slot]=v; localStorage.setItem("zvk_proto",JSON.stringify(o)); } }catch(_){} }
+function protoOf(slot){ return +(loadProto()[slot]||0); }
+function isRoomName(n){ return typeof n==="string" && n.length<80 && (n===GENERAL_ROOM || /^p-\d+-\d+-/.test(n)) && n.slice(-SECRET.length)===SECRET; }
+/* куда звать: уже в разговоре — в него же; общий — в общую; личный — в комнату пары
+   (если контакт точно на новой версии), иначе по-старому в общую */
+function roomForCall(to){ if(inRoom && roomName) return roomName; if(to===0) return GENERAL_ROOM; return protoOf(to)===2 ? pairRoom(getMySlot(),to) : GENERAL_ROOM; }
+function guessRoom(from, all){ if(all || !from) return GENERAL_ROOM; return protoOf(from)===2 ? pairRoom(from,getMySlot()) : GENERAL_ROOM; }
+function newCid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
+/* Состав группы — одинаковый у всех, по номерам 1…7 */
+const ROSTER = ["Миша","Папа","Мама","Оля","Соня","Катя","Лера"];
+function isPlaceholderName(n){ return /^Контакт \d+$/.test(String(n||"").trim()); }
+function defaultNames(){ const a=[]; for(let i=1;i<=SLOTS;i++) a.push(ROSTER[i-1] || ("Контакт "+i)); return a; }
 /* «тихий» (headless) режим: фоновая служба Android открывает ЭТУ ЖЕ страницу с
    ?headless=1&slot=N, чтобы ловить входящие звонки при закрытом приложении —
    без камеры и без интерфейса, только сигналы. */
@@ -653,9 +691,25 @@ const HEADLESS = __P.get("headless") === "1";
 const URL_SLOT = (function(){ const n = parseInt(__P.get("slot")||"0",10); return (n>=1&&n<=SLOTS)?n:0; })();
 function getMySlot(){ if (HEADLESS && URL_SLOT) return URL_SLOT; try{ const v=+(localStorage.getItem("zvk_slot")||0); return (v>=1&&v<=SLOTS)?v:0; }catch(_){ return 0; } }
 function setMySlot(n){ try{ localStorage.setItem("zvk_slot", String(n)); }catch(_){} }
-function getNames(){ try{ const a=JSON.parse(localStorage.getItem("zvk_names")||"null"); if(Array.isArray(a)){ const out=defaultNames(); for(let i=0;i<SLOTS;i++){ if(a[i]!=null && String(a[i]).trim()!=="") out[i]=a[i]; } return out; } }catch(_){} return defaultNames(); }
+function getNames(){ try{ const a=JSON.parse(localStorage.getItem("zvk_names")||"null"); if(Array.isArray(a)){ const out=defaultNames(); for(let i=0;i<SLOTS;i++){ if(a[i]!=null && String(a[i]).trim()!=="" && !isPlaceholderName(a[i])) out[i]=a[i]; } return out; } }catch(_){} return defaultNames(); }
 function setNames(a){ try{ localStorage.setItem("zvk_names", JSON.stringify(a)); }catch(_){} }
 function slotName(n){ return getNames()[n-1] || ("Контакт "+n); }
+/* v61: один раз на устройстве переходим на единый список. Прежние имена и кэш имён сбрасываются.
+   Если устройство было записано под другим именем, «кто вы» спросим заново — чтобы никто
+   не оказался под чужим именем. Если имя совпало со списком — ничего не спрашиваем. */
+(function migrateRoster(){
+  try{
+    if (localStorage.getItem("zvk_roster")==="1") return;
+    const my=+(localStorage.getItem("zvk_slot")||0);
+    let own=""; try{ const a=JSON.parse(localStorage.getItem("zvk_names")||"null"); if(Array.isArray(a) && my>=1) own=String(a[my-1]||"").trim(); }catch(_){}
+    const same = my>=1 && my<=SLOTS && !!own && own.toLowerCase()===String(ROSTER[my-1]||"").toLowerCase();
+    localStorage.setItem("zvk_roster","1");
+    localStorage.removeItem("zvk_names");
+    localStorage.removeItem("zvk_lobnames");
+    localStorage.removeItem("zvk2_myname");
+    if (!same) localStorage.removeItem("zvk_slot");
+  }catch(_){}
+})();
 
 /* ───────────── Состояние ───────────── */
 let roomName = "", roomId = "", myName = "";
@@ -742,15 +796,22 @@ async function enterRoom(name, video){
   name = (name||"").trim();
   if (name.length < 3){ setHomeStatus("Имя комнаты — минимум 3 символа.", "err"); return; }
   const nmInput = $("myName");
-  myName = ((nmInput && nmInput.value) || "").trim()
+  myName = (getMySlot() ? slotName(getMySlot()) : "")
+        || ((nmInput && nmInput.value) || "").trim()
         || (localStorage.getItem("zvk2_myname")||"").trim() || "Участник";
   try{ localStorage.setItem("zvk2_myname", myName); }catch(_){}
   roomName = name; roomId = roomIdFromName(name); withVideo = video;
   audioOnly = false;   // глобальный аудио-режим включается ТОЛЬКО кнопкой, а не способом входа
 
   setHomeStatus("Включаю " + (video?"камеру и микрофон":"микрофон") + "…");
-  try { localStream = await getMedia(video); }
+  const gen0 = session;
+  try {
+    const ms = await getMedia(video);
+    if (session !== gen0 || inRoom){ try{ ms.getTracks().forEach(t=>t.stop()); }catch(_){} return; }   // за это время звонок отменили
+    localStream = ms;
+  }
   catch(e){
+    if (session !== gen0) return;
     outgoing = null; clearTimeout(outTimer);
     inRoom = false;
     openStandby(explainMediaError(e));
@@ -767,6 +828,7 @@ async function enterRoom(name, video){
   setWaitStatus("Подключаюсь к каналам…");
   joinAll(s);
   startNetWatch(s);
+  reportVideo();
 }
 
 /* ───────────── Рой каналов (Trystero: Nostr + MQTT) ───────────── */
@@ -790,6 +852,9 @@ function joinAll(s){
       const needAct = room.makeAction("need");
       const fileAct = room.makeAction("file");   // бинарные действия для передачи файлов
       const fctlAct = room.makeAction("fctl");   // управление: запрос/подтверждение/докачка
+      const byeAct  = room.makeAction("bye");    // участник вышел сам
+      rec.sendBye = ()=>{ try{ const r = byeAct.send({}); r && r.catch && r.catch(()=>{}); }catch(_){} };
+      byeAct.onMessage = (d, ctx) => { if (s === session && ctx) onPeerBye(ctx.peerId); };
       rec.sendFile = (data, target, metadata)=>{
         try{ const r = fileAct.send(data, { targets:[target], metadata }); r && r.catch && r.catch(()=>{}); }catch(_){}
       };
@@ -897,7 +962,7 @@ function trackPeer(id, rec){
     const st = pc && pc.iceConnectionState;
     const v = p.tile && p.tile.querySelector("video");
     const haveMedia = (st === "connected" || st === "completed") || (v && v.videoWidth > 0) || p.gotStream;
-    if (!haveMedia && !FIXED_ROOM_REJOINED){
+    if (!haveMedia && !FIXED_ROOM_REJOINED && !anyHealthyPeer(id)){
       /* совсем не поднялось за 28 с — тихо перезапускаем подключение к комнате */
       FIXED_ROOM_REJOINED = true;
       silentRejoin();
@@ -929,6 +994,7 @@ function watchConnection(p, id){
           if (p.tile) p.tile.classList.remove("reconnecting");
           resumeXfersWith(id);   // связь восстановилась — продолжаем недокачанные файлы
         } else if (st === "disconnected" || st === "failed"){
+          if (p.leaving) return;                  // ушёл сам — не чиним
           if (p.tile) p.tile.classList.add("reconnecting");
           if (!p.badSince) p.badSince = Date.now();
           markXfersWaiting(id);
@@ -938,11 +1004,18 @@ function watchConnection(p, id){
             p.restartT = setTimeout(()=>{
               p.restartT = null;
               if (sess !== session || peers.get(id) !== p) return;
+              if (p.leaving) return;
               if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed"){
+                /* в общем разговоре участник пропал надолго (закрыл приложение, потерял сеть) —
+                   убираем его плитку, остальные продолжают говорить */
+                if (peers.size > 1 && p.badSince && Date.now() - p.badSince > 30000){ dropPeer(id); return; }
                 try{ pc.restartIce && pc.restartIce(); }catch(_){}
                 p.iceFails=(p.iceFails||0)+1;
-                if (p.iceFails>=2) triggerAutoRelay();   // прямое не лечится — уходим через реле
+                /* через реле (с перезагрузкой страницы) — только если связи нет ни с кем:
+                   иначе уход одного участника обрывал разговор у всех */
+                if (p.iceFails>=2 && !anyHealthyPeer(id)) triggerAutoRelay();
                 resendStreamTo(id);
+                if (p.iceFails>=2 && peers.size > 1){ p.restartT = null; setTimeout(onState, 8000); }
               }
             }, grace);
           }
@@ -996,6 +1069,7 @@ function resendStreamTo(id){
 function onTrackedLeave(id){
   const p = peers.get(id);
   if (!p) return;
+  p.leaving = true;
   /* участник пропал на этом канале — возможно, жив на другом */
   for (const rec of rooms){
     if (rec === p.rec) continue;
@@ -1026,6 +1100,23 @@ function onTrackedLeave(id){
     }, 6000);
   }
 }
+function onPeerBye(id){
+  const p = peers.get(id);
+  if (!p) return;
+  p.leaving = true;
+  dropPeer(id);
+}
+/* есть ли ещё живой собеседник (кроме указанного) — тогда разговор не перезапускаем */
+function anyHealthyPeer(exceptId){
+  for (const [pid, p] of peers){
+    if (pid === exceptId || p.leaving) continue;
+    let pc = null;
+    try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; pc = pcs && pcs[pid]; }catch(_){}
+    const st = pc && pc.iceConnectionState;
+    if (st === "connected" || st === "completed") return true;
+  }
+  return false;
+}
 function dropPeer(id){
   const p = peers.get(id);
   if (!p) return;
@@ -1039,9 +1130,11 @@ function dropPeer(id){
 
 /* следим за живостью каналов; если все умерли — переподключаемся */
 function startNetWatch(s){
-  let deadFor = 0;
+  let deadFor = 0, emptyFor = 0;
   const iv = setInterval(()=>{
     if (s !== session || !inRoom){ clearInterval(iv); return; }
+    emptyFor = peers.size === 0 ? emptyFor + 3 : 0;            // один в комнате 90 с — выходим сами
+    if (emptyFor >= 90){ clearInterval(iv); try{ leaveMeeting("Никто не подключился"); }catch(_){} return; }
     let open = 0;
     try{ open += Object.values(Trystero.nostrSockets()||{}).filter(w=>w && w.readyState===1).length; }catch(_){}
     if (open > 0){
@@ -1085,6 +1178,8 @@ function makeTile(id, isMe){
   const name = document.createElement("div");
   name.className = "name"; name.textContent = isMe ? (myName + " (вы)") : "Участник";
   tile.append(video, novid, name);
+  video.addEventListener("resize", ()=> fitTile(tile));
+  video.addEventListener("loadedmetadata", ()=> fitTile(tile));
   if (isMe){
     /* нажатие на своё имя — сменить его */
     name.addEventListener("click", e=>{
@@ -1234,6 +1329,7 @@ function applyZoomLayout(){
       delete t.dataset.fx;
     }
   }
+  fitAll();
 }
 function updateCount(){ $("countPill").textContent = "👤 " + (peers.size + 1); try{ if(window.Android&&Android.setPeers) Android.setPeers(peers.size); }catch(_){} }
 
@@ -1308,11 +1404,6 @@ function netTick(){
     else if (inRoom && peers.size>0 && NET.relay!=="TURN" && now-NET.lastRxGrow>12000){ NET.lastRxGrow=now; triggerAutoRelay(); }
     if (NET.prevTs){ const dt=(now-NET.prevTs)/1000; if(dt>0){ NET.curRx=dRx>0?dRx/dt:0; NET.curTx=dTx>0?dTx/dt:0; } }
     NET.prevRawRx=d.rx; NET.prevRawTx=d.tx; NET.prevTs=now; NET.relay=d.relay;
-    // один в комнате 90 сек — выходим сами, чтобы не висело «идёт звонок»
-    if (inRoom && peers.size===0){
-      if (!NET.emptySince) NET.emptySince=now;
-      else if (now-NET.emptySince>90000){ NET.emptySince=0; try{ leaveRoom("Никто не подключился"); }catch(_){} return; }
-    } else NET.emptySince=0;
     // авто «только звук»: через TURN на мобильной (экономия 500 МБ) ИЛИ в автомобиле (Android Auto)
     if (peers.size <= 1 && isCar() && !NET.carFlagged){
       NET.carFlagged=true; try{ applyAudioOnly(true,true,"car"); }catch(_){}
@@ -1350,6 +1441,7 @@ function applyStatsBarPref(){ try{ const on=localStorage.getItem("zvk_stats_bar"
 let autoRelayFired=false;
 async function triggerAutoRelay(){
   if (autoRelayFired) return;
+  if (peers.size > 1 && anyHealthyPeer()) return;     // с кем-то связь есть — не рвём разговор всем
   try{ if (sessionStorage.getItem("zvk_auto_relay")==="1") return; }catch(_){}
   autoRelayFired = true;
   /* реле может быть недоступно (бесплатный сервер) — тогда переезд «только через
@@ -1361,7 +1453,8 @@ async function triggerAutoRelay(){
   toast("Прямое соединение не пошло — переключаюсь через реле…");
   const v = (withVideo && !audioOnly) ? "1" : "0";
   const nm = callLabel ? ("&name="+encodeURIComponent(callLabel)) : "";
-  setTimeout(()=>{ try{ location.replace(location.pathname+"?autojoin=1&video="+v+nm); }catch(_){ location.reload(); } }, 700);
+  const rm = roomName ? ("&room="+encodeURIComponent(roomName)) : "";
+  setTimeout(()=>{ try{ location.replace(location.pathname+"?autojoin=1&relay=1&video="+v+nm+rm); }catch(_){ location.reload(); } }, 700);
 }
 async function probeTurn(servers, ms){
   let ok=false, pc=null;
@@ -1401,6 +1494,7 @@ function netWire(){
 function applyAudioOnly(on, broadcast, reason){
   if (audioOnly === on && !broadcast && reason===undefined){ updateAudioBadges(); return; }
   audioOnly = on;
+  const scrR = !!(reason && reason.indexOf("scr")>=0);
   if (!on){ audioCar=false; audioTurn=false; }
   else if (reason){ if(reason.indexOf("car")>=0) audioCar=true; if(reason.indexOf("turn")>=0) audioTurn=true; }
   if (localStream) localStream.getVideoTracks().forEach(t=> t.enabled = !on);
@@ -1408,18 +1502,60 @@ function applyAudioOnly(on, broadcast, reason){
   if (me) refreshTileVideo(me, localStream);
   updateModeBtn(); updateCtlIcons(); updateAudioBadges();
   if (broadcast){
-    const rs=(audioCar?"car":"")+(audioTurn?"turn":"");
+    const rs=(audioCar?"car":"")+(audioTurn?"turn":"")+(scrR?"scr":"");
     for (const rec of rooms) rec.sendMode({ audioOnly: on, reason: rs });
-    toast(on ? "🎙 Аудио-режим включён для всех" : "📹 Видео включено для всех");
+    if (!scrR) toast(on ? "🎙 Аудио-режим включён для всех" : "📹 Видео включено для всех");
   } else if (reason===undefined){
     toast(on ? "🎙 Собеседник перевёл звонок в аудио-режим" : "📹 Собеседник вернул видео");
+  } else if (scrR && on){
+    toast("📵 У собеседника погас экран — пока только звук");
   }
+  reportVideo();
 }
 function updateModeBtn(){
   const b = $("btnMode");
   b.textContent = audioOnly ? "📹 Вернуть видео" : "🎙 Аудио для всех";
   b.classList.toggle("modeon", audioOnly);
 }
+
+/* ───────────── Погашенный экран → «только звук» ─────────────
+   Экран погас (кнопкой или приложение ушло в фон без «картинки в картинке»):
+   камера останавливается (батарея), собеседник видит аватар; в разговоре вдвоём
+   видео ставится на паузу у обоих (трафик). Экран включился — всё возвращается. */
+let scrPaused=null, scrAudio=false, scrT=null;
+function localVideoLive(){ return !!(localStream && localStream.getVideoTracks().some(t=>t.readyState==="live" && t.enabled)); }
+function reportVideo(){ try{ if(window.Android&&Android.setVideoActive) Android.setVideoActive(!!(inRoom && !audioOnly && !scrPaused && localVideoLive())); }catch(_){} }
+function screenOff(){
+  if(!inRoom || scrPaused || !localStream) return;
+  if(localVideoLive() && !audioOnly){
+    const t=localStream.getVideoTracks()[0];
+    const st=(t && t.getSettings && t.getSettings()) || {};
+    scrPaused={ deviceId: st.deviceId || null, facing };
+    try{ t.enabled=false; t.stop(); }catch(_){}
+    for(const [pid,p] of peers) p.rec.sendMeta({ name: myName, vid:false }, pid);
+    if(peers.size===1){ scrAudio=true; applyAudioOnly(true, true, "scr"); }
+  }
+  reportVideo();
+}
+async function screenOn(){
+  if(!inRoom) return;
+  const sp=scrPaused; scrPaused=null;
+  if(sp){
+    let ns=null;
+    const base={ width:{ideal:960}, height:{ideal:540}, frameRate:{ideal:24,max:27} };
+    if(sp.deviceId){ try{ ns=await gumTimeout({ video:Object.assign({ deviceId:{exact:sp.deviceId} }, base), audio:false }, 8000); }catch(_){} }
+    if(!ns){ try{ ns=await gumTimeout({ video:Object.assign({ facingMode:sp.facing }, base), audio:false }, 8000); }catch(_){} }
+    if(ns && inRoom){ await applyNewCamera(ns); for(const [pid,p] of peers) p.rec.sendMeta({ name: myName, vid:true }, pid); }
+    else if(inRoom) toast("Камера не включилась — нажмите 📹");
+  }
+  if(scrAudio){ scrAudio=false; if(audioOnly && !audioCar && !audioTurn) applyAudioOnly(false, true, "scr"); }
+  const me=document.querySelector('.tile[data-me="1"]'); if(me && localStream) refreshTileVideo(me, localStream);
+  updateCtlIcons(); reportVideo();
+}
+window.__screen=function(on){
+  if(on){ if(!document.hidden){ clearTimeout(scrT); if(scrPaused||scrAudio) screenOn(); } }
+  else if(inRoom){ clearTimeout(scrT); scrT=setTimeout(screenOff, 600); }
+};
 
 /* ───────────── Управление ───────────── */
 function toggleMic(){ if(!localStream) return; localStream.getAudioTracks().forEach(t=>t.enabled=!t.enabled); updateCtlIcons(); }
@@ -1428,7 +1564,7 @@ function toggleCam(){
   localStream.getVideoTracks().forEach(t=>t.enabled=!t.enabled);
   const me = document.querySelector('.tile[data-me="1"]');
   if (me) refreshTileVideo(me, localStream);
-  updateCtlIcons();
+  updateCtlIcons(); reportVideo();
 }
 let videoInputs = [], frontIds = [], backIds = [];
 let allCamIds = [], camIdx = -1;
@@ -1470,6 +1606,7 @@ async function applyNewCamera(ns){
   /* 3) Через 2.5 с проверяем, что видео реально уходит; кому не ушло (Huawei
      молча игнорирует замену) — точечно пере-отправляем поток. */
   if (peers.size > 0) setTimeout(verifyOutboundVideo, 2500);
+  reportVideo();
   return true;
 }
 async function verifyOutboundVideo(){
@@ -1496,6 +1633,40 @@ async function openById(id){
 
 /* короткое нажатие — следующая камера по кругу (фронт/тыл/доп. объективы).
    Гарантированно переключает на ДРУГУЮ камеру и запоминает выбор. */
+const IS_TABLET = Math.min(screen.width, screen.height) >= 600;   // планшеты: экран вращается
+let orientT=null;
+/* Поворот: камеру не перезапускаем — система сама поворачивает кадр. Подстраиваем
+   только показ: картинка другой ориентации показывается целиком (с полями),
+   а не обрезается; миниатюра принимает форму кадра. */
+function fitTile(tile){
+  if (!tile) return;
+  const v = tile.querySelector("video"); if (!v) return;
+  const vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) return;
+  const g = $("grid");
+  const mini = g.classList.contains("haszoom") && !tile.classList.contains("zoom");
+  if (mini){
+    tile.style.aspectRatio = vw + " / " + vh;
+    tile.style.width = (vw > vh ? 150 : 104) + "px";
+    tile.classList.remove("fit");
+    return;
+  }
+  tile.style.aspectRatio = ""; tile.style.width = "";
+  const tw = tile.clientWidth, th = tile.clientHeight; if (!tw || !th) return;
+  tile.classList.toggle("fit", (vw > vh) !== (tw > th));
+}
+function fitAll(){ document.querySelectorAll("#grid .tile").forEach(fitTile); }
+function clampMinis(){
+  document.querySelectorAll("#grid .tile[data-fx]").forEach(t=>{
+    const r = t.getBoundingClientRect();
+    const x = Math.min(Math.max(2, r.left), innerWidth - r.width - 2);
+    const y = Math.min(Math.max(2, r.top), innerHeight - r.height - 2);
+    t.style.left = x + "px"; t.style.top = y + "px";
+  });
+}
+window.addEventListener("resize", function(){
+  clearTimeout(orientT);
+  orientT = setTimeout(function(){ try{ applyZoomLayout(); clampMinis(); fitAll(); }catch(_){} }, 250);
+});
 async function flipCam(){
   if (!localStream || !localStream.getVideoTracks().length) return;
   const btn = $("btnFlip");
@@ -1586,6 +1757,7 @@ const OUT_MAP = {
   EARPIECE: ["📱","Разговорный динамик (ухо)"],
   BLUETOOTH:["🎧","Bluetooth"],
   WIRED:    ["🎧","Наушники"],
+  HEADSET:  ["🎧","Наушники"],
 };
 function setSpkIconByLabel(where){
   const m = OUT_MAP[where] || OUT_MAP.SPEAKER;
@@ -1685,6 +1857,7 @@ window.__setPip = window.setPipMode;   // вызывается из MainActivity
    без хвостов в кэше каналов (обход сырого места библиотеки роя).            */
 function leaveRoom(msg, isErr){
   if (!inRoom && !rooms.length){ show("scr-home"); return; }
+  try{ sendByeAll(); }catch(_){}
   inRoom = false;
   try{ sessionStorage.removeItem("zvk_auto_relay"); }catch(_){}   // новый звонок снова начнёт с прямого
   try{ if(window.Android && Android.setInCall) Android.setInCall(false); }catch(_){}
@@ -1697,6 +1870,15 @@ function leaveRoom(msg, isErr){
   hardCleanup();
   if (localStream){ localStream.getTracks().forEach(t=>t.stop()); localStream = null; }
   setTimeout(()=> location.reload(), 200);
+}
+/* закрыть каналы, таймеры участников и счётчики разговора */
+function hardCleanup(){
+  try{ clearInterval(ringRepeatT); ringRepeatT=null; }catch(_){}
+  const old=rooms; rooms=[];
+  old.forEach(r=>{ try{ r.room.leave(); }catch(_){} });
+  try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
+  peers=new Map();
+  try{ stopTimer(); }catch(_){}
 }
 /* переподключение без участия пользователя (если умерли все каналы) */
 function silentRejoin(){
@@ -2054,23 +2236,37 @@ let lobbyNames = (function(){ try{ const o=JSON.parse(localStorage.getItem("zvk_
 function saveLobbyNames(){ try{ localStorage.setItem("zvk_lobnames", JSON.stringify(lobbyNames)); }catch(_){} }
 function displayName(slot){ return lobbyNames[slot] || slotName(slot); }
 
-/* ── рингтон (генерируется, без файлов) ── */
+/* ── рингтон: на Android звонит система (громкость звонка, беззвучный режим, своя мелодия);
+   в браузере/на iPhone — синтез, 4 варианта на выбор ── */
+const WEB_TONES = [ {n:"Классика", f:[523,659]}, {n:"Мягкий", f:[440,554]}, {n:"Звонкий", f:[784,988]}, {n:"Тройной", f:[659,784,988]} ];
+function webToneIdx(){ try{ const v=+(localStorage.getItem("zvk_tone")||0); return (v>=0&&v<WEB_TONES.length)?v:0; }catch(_){ return 0; } }
+function nativeRing(){ try{ return !!(window.Android && Android.ringStart); }catch(_){ return false; } }
 let ring = { ctx:null, tone:null, vib:null };
 function primeAudio(){ try{ if(!ring.ctx){ const AC=window.AudioContext||window.webkitAudioContext; if(AC) ring.ctx=new AC(); } if(ring.ctx&&ring.ctx.state==="suspended") ring.ctx.resume(); }catch(_){} }
+function webBeep(idx){
+  const ctx=ring.ctx; if(!ctx) return;
+  try{
+    const fr=(WEB_TONES[idx]||WEB_TONES[0]).f;
+    fr.forEach((hz,i)=>{
+      const t0=ctx.currentTime+i*0.3;
+      const o=ctx.createOscillator(), g=ctx.createGain(); o.type="sine"; o.frequency.value=hz;
+      g.gain.setValueAtTime(0.0001,t0); g.gain.exponentialRampToValueAtTime(0.28,t0+0.05); g.gain.exponentialRampToValueAtTime(0.0001,t0+0.55);
+      o.connect(g); g.connect(ctx.destination); o.start(t0); o.stop(t0+0.6);
+    });
+  }catch(_){}
+}
 function startRing(){
-  primeAudio(); const ctx=ring.ctx; stopRing();
-  const beep=()=>{ if(!ctx) return; try{
-    const o=ctx.createOscillator(), g=ctx.createGain(); o.type="sine"; o.frequency.value=523;
-    g.gain.setValueAtTime(0.0001,ctx.currentTime); g.gain.exponentialRampToValueAtTime(0.28,ctx.currentTime+0.05); g.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.55);
-    o.connect(g); g.connect(ctx.destination); o.start(); o.stop(ctx.currentTime+0.6);
-    const o2=ctx.createOscillator(), g2=ctx.createGain(); o2.type="sine"; o2.frequency.value=659;
-    g2.gain.setValueAtTime(0.0001,ctx.currentTime+0.3); g2.gain.exponentialRampToValueAtTime(0.28,ctx.currentTime+0.35); g2.gain.exponentialRampToValueAtTime(0.0001,ctx.currentTime+0.85);
-    o2.connect(g2); g2.connect(ctx.destination); o2.start(ctx.currentTime+0.3); o2.stop(ctx.currentTime+0.9);
-  }catch(_){} };
+  if (nativeRing()){ try{ Android.ringStart(); }catch(_){} return; }   // системная мелодия звонка
+  primeAudio(); stopRing();
+  const idx=webToneIdx(); const beep=()=>webBeep(idx);
   beep(); ring.tone=setInterval(beep,2000);
   try{ if(navigator.vibrate){ navigator.vibrate([600,300,600]); ring.vib=setInterval(()=>navigator.vibrate([600,300,600]),2000);} }catch(_){}
 }
-function stopRing(){ if(ring.tone){clearInterval(ring.tone);ring.tone=null;} if(ring.vib){clearInterval(ring.vib);ring.vib=null;} try{ if(navigator.vibrate) navigator.vibrate(0);}catch(_){} }
+function stopRing(){
+  if(ring.tone){clearInterval(ring.tone);ring.tone=null;} if(ring.vib){clearInterval(ring.vib);ring.vib=null;}
+  try{ if(navigator.vibrate) navigator.vibrate(0);}catch(_){}
+  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
+}
 
 /* ── прихожа́я: тихий канал сигналов, держим ВСЕГДА (даже в разговоре) ── */
 function joinLobby(){
@@ -2082,10 +2278,10 @@ function joinLobby(){
     const presAct=room.makeAction("pres");
     lobby={ room,
       sendRing:(d,target)=>{ try{ const r=ringAct.send(d,target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
-      sendPres:(target)=>{ try{ const m=getMySlot(); const r=presAct.send({slot:m,name:slotName(m),tok:myPushTarget(),plat:myPlatform()},target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
+      sendPres:(target)=>{ try{ const m=getMySlot(); const r=presAct.send({slot:m,name:slotName(m),tok:myPushTarget(),plat:myPlatform(),v:PROTO},target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
       slotByPeer:new Map() };
-    ringAct.onMessage=(d,ctx)=>{ if(d) onRing(d); };
-    presAct.onMessage=(d,ctx)=>{ if(d&&d.slot&&ctx){ lobby.slotByPeer.set(ctx.peerId,d.slot); if(d.name){ lobbyNames[d.slot]=d.name; saveLobbyNames(); } if(d.tok){ cacheToken(d.slot, d.tok, d.plat); } recountOnline(); } };
+    ringAct.onMessage=(d,ctx)=>{ if(d&&typeof d==="object") onRing(Object.assign({},d,{viaLobby:true})); };
+    presAct.onMessage=(d,ctx)=>{ if(d&&d.slot&&ctx){ lobby.slotByPeer.set(ctx.peerId,d.slot); setProto(d.slot, (+d.v>=2)?2:1); if(d.name && !isPlaceholderName(d.name)){ lobbyNames[d.slot]=d.name; saveLobbyNames(); } if(d.tok){ cacheToken(d.slot, d.tok, d.plat); } recountOnline(); } };
     room.onPeerJoin=(id)=>{ lobby&&lobby.sendPres(id); };
     room.onPeerLeave=(id)=>{ if(lobby){ lobby.slotByPeer.delete(id); recountOnline(); } };
     lobbyOnline=new Set([my]); renderMenuAll();
@@ -2102,106 +2298,228 @@ function reportSlot(){ try{ if(window.Android&&Android.setSlot) Android.setSlot(
 window.headlessDecline = function(){ const f=window.__lastRingFrom; if(f&&lobby) lobby.sendRing({t:"decline",from:getMySlot(),to:f,room:GENERAL_ROOM}); };
 function startHeadless(){ joinLobby(); }   // в тихом режиме только слушаем звонки
 
-/* ── приём сигнала звонка (все сходятся в ОБЩЕЙ комнате) ── */
+/* ── приём сигнала звонка ──
+   v60: личный звонок идёт в комнату пары (видят только двое), общий — в общую.
+   Звонящий повторяет сигнал каждые 3 с, пока не ответят: так его ловит и телефон,
+   разбуженный пушем, и тот, у кого «прихожая» моргнула. */
+const handledCalls = new Map();              // уже обработанные вызовы: ключ -> время
+let acceptedGuess = null;                    // приняли по пушу «наугад» — ждём точную комнату
+let ringRepeatT = null;
+function callKey(d){ return d.cid ? ("c:"+d.cid) : ("f:"+d.from+":"+(d.room||"")); }
+function markHandled(d){ if(!d) return; const now=Date.now(); handledCalls.set(callKey(d), now); for(const [k,t] of handledCalls) if(now-t>90000) handledCalls.delete(k); }
+function wasHandled(d){ const t=handledCalls.get(callKey(d)); return !!t && Date.now()-t<90000; }
+function sendRingRepeated(msg, durMs){
+  clearInterval(ringRepeatT);
+  const t0=Date.now();
+  const tick=()=>{ if(lobby) lobby.sendRing(msg); };
+  tick();
+  ringRepeatT=setInterval(()=>{
+    const stop = !outgoing || outgoing.cid!==msg.cid || Date.now()-t0>durMs || (msg.to!==0 && peers.size>0);
+    if(stop){ clearInterval(ringRepeatT); ringRepeatT=null; return; }
+    tick();
+  }, 3000);
+}
 function onRing(d){
+  if(!d || typeof d!=="object") return;
   const my=getMySlot();
-  if (d.t==="cancel"){ if(incoming){ try{ if(window.Android&&Android.missedCall) Android.missedCall(incoming.all?("Общий созвон ("+incoming.name+")"):incoming.name); }catch(_){} hideIncoming(); backToWhereWeWere(); } return; }
+  const from=+d.from||0, to=+d.to||0;
+  if (d.t==="cancel"){
+    if(!incoming || from!==incoming.from) return;               // отменили чужой вызов — не наш
+    if(to!==0 && to!==my) return;
+    if(d.cid && incoming.cid && d.cid!==incoming.cid) return;
+    const inc=incoming; markHandled(inc);
+    try{ if(window.Android&&Android.missedCall) Android.missedCall(inc.all?("Общий созвон ("+inc.name+")"):inc.name); }catch(_){}
+    nativeIncomingEnded(true);
+    hideIncoming(); backToWhereWeWere();
+    return;
+  }
   if (d.t==="decline"){
-    if(outgoing && d.from===outgoing.to){
-      clearTimeout(outTimer); outgoing=null;
-      if(inRoom && peers.size===0){ leaveMeeting(displayName(d.from)+" отклонил вызов"); }
-      else setMenuNote(displayName(d.from)+": не сейчас");
+    if(outgoing && to===my && from===outgoing.to && (!d.cid || !outgoing.cid || d.cid===outgoing.cid)){
+      const own=outgoing.own; clearTimeout(outTimer); outgoing=null; clearInterval(ringRepeatT); ringRepeatT=null;
+      if(own && peers.size===0){ leaveMeeting(displayName(from)+": вызов отклонён"); }   // и если камера ещё включалась
+      else setMenuNote(displayName(from)+": не сейчас");
     }
     return;
   }
   if (d.t==="call"){
-    const forMe=(d.to===0)||(d.to===my);
-    if(!forMe||d.from===my) return;
-    window.__lastRingFrom = d.from;
+    const forMe=(to===0)||(to===my);
+    if(!forMe || !from || from===my) return;
+    if(d.viaLobby) setProto(from, (+d.v>=2)?2:1);
+    const room = isRoomName(d.room) ? d.room : guessRoom(from, to===0);
+    window.__lastRingFrom = from;
     if (HEADLESS){
-      try{ if(window.Android&&Android.onRing) Android.onRing(d.from, d.name||("Контакт "+d.from), d.video?1:0, (d.to===0)?1:0); }catch(_){}
+      try{ if(window.Android&&Android.onRing) Android.onRing(from, d.name||("Контакт "+from), d.video?1:0, (to===0)?1:0); }catch(_){}
       return;
     }
-    if(incoming) return;
-    incoming={ from:d.from, video:!!d.video, all:(d.to===0), name:d.name||slotName(d.from) };
+    /* приняли по пушу «наугад», а звонящий в другой комнате — переходим к нему */
+    if (acceptedGuess && acceptedGuess.from===from && Date.now()<acceptedGuess.until && isRoomName(d.room)){
+      if (d.room!==roomName){
+        if (inRoom) retargetRoom(d.room);
+        else { roomName=d.room; roomId=roomIdFromName(d.room); }   // камера ещё включается — войдём сразу к звонящему
+      }
+      if (inRoom && d.room===roomName) acceptedGuess=null;
+      return;
+    }
+    if (wasHandled(d)) return;
+    if (inRoom && room===roomName) return;                      // мы уже в этом разговоре
+    if (incoming){
+      if (incoming.from===from && incoming.all===(to===0)){     // повтор того же вызова — уточняем
+        if (isRoomName(d.room)){ incoming.room=d.room; incoming.guessed=false; }
+        if (d.cid && !incoming.cid) incoming.cid=d.cid;
+        if (typeof d.video==="boolean") incoming.video=d.video;
+      }
+      return;
+    }
+    incoming={ from, to, video:(d.video!==false && d.video!==0), all:(to===0), name:d.name||slotName(from),
+               room, cid:d.cid||"", guessed:!isRoomName(d.room) };
     showIncoming();
   }
 }
+function nativeIncomingEnded(missed){
+  try{ if(window.Android&&Android.incomingEnded){ Android.incomingEnded(!!missed); return; } }catch(_){}
+  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
+  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}
+}
 
 /* ── входящий ── */
-let wokenForCall=false, incomingTimer=null;
+let incomingTimer=null, carAnsT=null;
 function showIncoming(){
   $("incName").textContent = incoming.all?"Общий созвон":incoming.name;
   $("incSub").textContent  = incoming.all?("звонит "+incoming.name):(incoming.video?"Входящий видеозвонок…":"Входящий звонок…");
   $("incAv").textContent   = incoming.all?"👥":"👤";
   show("scr-incoming"); startRing();
+  try{ if(window.Android&&Android.incomingShown) Android.incomingShown(incoming.from, incoming.to||0, String(incoming.name||""), !!incoming.video, !!incoming.all); }catch(_){}
   clearTimeout(incomingTimer); incomingTimer=setTimeout(onNoAnswer, 40000);   // не ответили — не висим на экране
+  scheduleCarAutoAnswer();
+}
+/* в машине по желанию отвечаем сами через 5 секунд (только звук) */
+function scheduleCarAutoAnswer(){
+  clearTimeout(carAnsT);
+  let on=false; try{ on=localStorage.getItem("zvk_car_auto")==="1"; }catch(_){}
+  if(!on || !isCar()) return;
+  carAnsT=setTimeout(()=>{ if(incoming && isCar()) acceptCall(false); }, 5000);
 }
 function onNoAnswer(){
   if(!incoming) return;
-  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
-  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}
-  const woke = wokenForCall; hideIncoming();
-  if(inRoom){ backToWhereWeWere(); return; }
-  if(woke){ try{ if(window.Android&&Android.closeApp){ Android.closeApp(); return; } }catch(_){} }
-  backToWhereWeWere();
+  const inc=incoming; markHandled(inc);
+  try{ if(window.Android&&Android.missedCall) Android.missedCall(inc.all?("Общий созвон ("+inc.name+")"):inc.name); }catch(_){}
+  nativeIncomingEnded(true);          // система гасит экран и убирает окно, если поднимала его ради звонка
+  hideIncoming(); backToWhereWeWere();
 }
-function hideIncoming(){ clearTimeout(incomingTimer); wokenForCall=false; stopRing(); incoming=null; }
-function acceptCall(){
+function hideIncoming(){ clearTimeout(incomingTimer); clearTimeout(carAnsT); stopRing(); incoming=null; }
+function acceptCall(videoOverride){
   if(!incoming) return;
-  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
-  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}
-  const video=incoming.video, nm=incoming.all?"Общий созвон":incoming.name;
-  clearTimeout(incomingTimer); wokenForCall=false; stopRing(); incoming=null; callLabel=nm;
-  if(inRoom){ closeMenu(); show("scr-call"); } else enterMeeting(video);
+  const inc=incoming;
+  let video = (typeof videoOverride==="boolean") ? videoOverride : inc.video;
+  if (isCar()) video=false;                                     // в машине — только звук
+  const nm=inc.all?"Общий созвон":inc.name;
+  markHandled(inc);
+  clearTimeout(incomingTimer); clearTimeout(carAnsT); stopRing(); incoming=null;
+  try{
+    if(window.Android&&Android.callAnswered) Android.callAnswered(!!video);
+    else if(window.Android){ if(Android.stopRing) Android.stopRing(); if(Android.endCall) Android.endCall(); }
+  }catch(_){}
+  acceptedGuess = inc.guessed ? { from:inc.from, until:Date.now()+40000 } : null;
+  const room = inc.room || GENERAL_ROOM;
+  if(inRoom){
+    if(room===roomName){ closeMenu(); show("scr-call"); return; }
+    switchMeeting(room, video, nm, inc.all?0:inc.from);         // были в другом разговоре — переходим
+    return;
+  }
+  callLabel=nm;
+  enterMeeting(video, room);
 }
 function declineCall(){
   if(!incoming) return;
-  if(lobby) lobby.sendRing({t:"decline",from:getMySlot(),to:incoming.from,room:GENERAL_ROOM});
-  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
-  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}
+  const inc=incoming; markHandled(inc);
+  if(lobby) lobby.sendRing({t:"decline",from:getMySlot(),to:inc.from,room:inc.room||GENERAL_ROOM,cid:inc.cid||""});
+  nativeIncomingEnded(false);
   hideIncoming(); backToWhereWeWere();
 }
 function backToWhereWeWere(){ if(inRoom) show("scr-call"); else show("scr-contacts"); }
 
 /* ── исходящие ── */
+function nativeCallStarted(to, video){
+  try{ if(window.Android&&Android.callStarted) Android.callStarted(to, to===0?"Общий созвон":String(displayName(to)), !!video); }catch(_){}
+}
 function callContact(slot, video){
   primeAudio(); const my=getMySlot(); if(!my||slot===my) return;
-  closeMenu(); callLabel=displayName(slot);
-  outgoing={to:slot}; clearTimeout(outTimer); outTimer=setTimeout(()=>{ outgoing=null; },40000);
-  if(lobby) lobby.sendRing({t:"call",from:my,to:slot,room:GENERAL_ROOM,video,name:slotName(my)});
+  if (isCar()) video=false;
+  closeMenu();
+  const room=roomForCall(slot), cid=newCid();
+  if(!inRoom) callLabel=displayName(slot);
+  outgoing={to:slot, cid, room, own:!inRoom}; clearTimeout(outTimer);
+  outTimer=setTimeout(()=>{
+    if(inRoom && peers.size===0 && outgoing && outgoing.cid===cid && outgoing.own && roomName===room) leaveMeeting(displayName(slot)+" не отвечает");
+    else if(outgoing && outgoing.cid===cid) outgoing=null;
+  }, 50000);
+  sendRingRepeated({t:"call",from:my,to:slot,room,video,name:slotName(my),v:PROTO,cid}, 40000);
   pushCall(slot, video);            // разбудить телефон, если приложение закрыто
-  if(!inRoom) enterMeeting(video);
+  if(!inRoom){ enterMeeting(video, room); nativeCallStarted(slot, video); }
   setMenuNote("Звоню "+displayName(slot)+"…");
 }
 function callGeneral(video){
   primeAudio(); const my=getMySlot(); if(!my) return;
-  closeMenu(); callLabel="Общий созвон";
-  if(lobby) lobby.sendRing({t:"call",from:my,to:0,room:GENERAL_ROOM,video,name:slotName(my)});
+  if (isCar()) video=false;
+  closeMenu();
+  const room=(inRoom && roomName) ? roomName : GENERAL_ROOM, cid=newCid();
+  if(!inRoom) callLabel="Общий созвон";
+  outgoing={to:0, cid, room}; clearTimeout(outTimer); outTimer=setTimeout(()=>{ outgoing=null; },40000);
+  sendRingRepeated({t:"call",from:my,to:0,room,video,name:slotName(my),v:PROTO,cid}, 40000);
   pushCall(0, video);               // разбудить всех, у кого приложение закрыто
-  if(!inRoom) enterMeeting(video);
+  if(!inRoom){ enterMeeting(video, room); nativeCallStarted(0, video); }
   setMenuNote("Звоню всем…");
 }
 
 /* ── вход/выход из встречи БЕЗ перезагрузки страницы ── */
-function enterMeeting(video){
+function enterMeeting(video, room){
   if(inRoom){ closeMenu(); show("scr-call"); return; }
   try{ localStorage.setItem("zvk2_myname", slotName(getMySlot())); }catch(_){}
-  enterRoom(GENERAL_ROOM, video!==false);   // прихожую НЕ трогаем — звонки доходят и в разговоре
+  enterRoom(room || GENERAL_ROOM, video!==false);   // прихожую НЕ трогаем — звонки доходят и в разговоре
 }
-function leaveMeeting(note){
+function sendByeAll(){ for(const rec of rooms){ try{ rec.sendBye && rec.sendBye(); }catch(_){} } }
+/* общее завершение: сообщить «до свидания», отменить дозвон, освободить камеру и систему */
+function leaveMeetingCore(){
   closeMenu(); session++;
-  try{ if(outgoing && peers.size===0){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:GENERAL_ROOM}); pushCancel(outgoing.to); } }catch(_){}  // отменяем дозвон у получателя (реле + пуш)
+  clearInterval(ringRepeatT); ringRepeatT=null; acceptedGuess=null;
+  try{ if(outgoing && peers.size===0){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:outgoing.room||GENERAL_ROOM,cid:outgoing.cid||""}); pushCancel(outgoing.to); } }catch(_){}  // отменяем дозвон у получателя (реле + пуш)
   outgoing=null; clearTimeout(outTimer);
-  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}   // закрыть системный звонок (Telecom/Auto)
-  try{ rooms.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }catch(_){}
-  rooms=[];
+  try{ sendByeAll(); }catch(_){}
+  try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}     // закрыть системный звонок (Telecom/Auto)
+  try{ if(window.Android&&Android.setInCall) Android.setInCall(false); }catch(_){}   // убрать «Идёт звонок», отпустить экран
+  const oldRooms=rooms; rooms=[];
+  setTimeout(()=>{ oldRooms.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
+  try{ clearInterval(window.__spkPoll); window.__spkPoll=null; }catch(_){}
   try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
-  peers=new Map(); hadPeer=false;
+  peers=new Map(); hadPeer=false; scrPaused=null; scrAudio=false; clearTimeout(scrT);
   try{ if(localStream){ localStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){} }); } }catch(_){}
   localStream=null; inRoom=false; try{ stopTimer(); }catch(_){}
+  try{ sessionStorage.removeItem("zvk_auto_relay"); }catch(_){}
   const grid=$("grid"); if(grid) grid.innerHTML="";
+}
+function leaveMeeting(note){
+  leaveMeetingCore();
   openStandby(note);
+}
+/* перейти в другой разговор (приняли второй вызов) */
+function switchMeeting(room, video, label, who){
+  leaveMeetingCore();
+  callLabel=label;
+  setTimeout(()=>{ enterMeeting(video, room); if(isCar()) nativeCallStarted(who||0, video); }, 350);
+}
+/* вошли «наугад» (по пушу), звонящий оказался в другой комнате — переезжаем, камеру не трогаем */
+function retargetRoom(name){
+  if(!inRoom || !isRoomName(name) || name===roomName) return;
+  try{ sendByeAll(); }catch(_){}
+  const old=rooms; rooms=[];
+  setTimeout(()=>{ old.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
+  try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
+  session++; peers=new Map(); hadPeer=false;
+  roomName=name; roomId=roomIdFromName(name);
+  const s=session;
+  setupCallScreen();
+  setWaitStatus("Подключаюсь к звонящему…");
+  joinAll(s); startNetWatch(s);
 }
 function onAloneAfterCall(){ leaveMeeting("Собеседник завершил разговор"); }
 
@@ -2238,8 +2556,8 @@ function openStandby(note){
 }
 
 /* ── имена ── */
-function editContactName(sN){ const names=getNames(); const v=prompt("Имя контакта "+sN+":",names[sN-1]||""); if(v!==null){ names[sN-1]=v.trim()||("Контакт "+sN); setNames(names); renderMenuAll(); } }
-function renameMe(){ const my=getMySlot(); const names=getNames(); const v=prompt("Ваше имя (его увидят остальные):",names[my-1]||""); if(v!==null){ names[my-1]=v.trim()||("Контакт "+my); setNames(names); lobbyNames[my]=names[my-1]; saveLobbyNames(); try{localStorage.setItem("zvk2_myname",names[my-1]);}catch(_){} if(lobby) lobby.sendPres(); renderMenuAll(); } }
+function editContactName(sN){ const names=getNames(); const v=prompt("Имя контакта "+sN+":",names[sN-1]||""); if(v!==null){ names[sN-1]=v.trim()||defaultNames()[sN-1]; setNames(names); renderMenuAll(); } }
+function renameMe(){ const my=getMySlot(); const names=getNames(); const v=prompt("Ваше имя (его увидят остальные):",names[my-1]||""); if(v!==null){ names[my-1]=v.trim()||defaultNames()[my-1]; setNames(names); lobbyNames[my]=names[my-1]; saveLobbyNames(); try{localStorage.setItem("zvk2_myname",names[my-1]);}catch(_){} if(lobby) lobby.sendPres(); renderMenuAll(); } }
 
 /* ── первый запуск: кто я (можно один слот на нескольких устройствах) ── */
 function renderSetup(){
@@ -2247,28 +2565,41 @@ function renderSetup(){
   for(let sN=1;sN<=SLOTS;sN++){
     const b=document.createElement("button"); b.className="btn secondary"; b.style.cssText="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;width:100%;padding:14px 16px";
     b.innerHTML="<span>Я — "+(names[sN-1]||("Контакт "+sN))+"</span><span style='color:var(--dim);font-size:13px'>слот "+sN+"</span>";
-    b.onclick=()=>{ const cur=(names[sN-1]&&!String(names[sN-1]).startsWith("Контакт"))?names[sN-1]:""; const v=prompt("Ваше имя (его увидят остальные):",cur); if(v===null) return; const nm=v.trim(); if(nm){ names[sN-1]=nm; setNames(names); } setMySlot(sN); startApp(); };
+    b.onclick=()=>{ setMySlot(sN); startApp(); };
     box.append(b);
   }
 }
 function startApp(){
   try{ localStorage.setItem("zvk2_myname", slotName(getMySlot())); }catch(_){}
   reportSlot();                             // регистрируем токен для звонков при закрытом приложении
-  joinLobby();
-  enterMeeting(true);                       // сразу в комнату, как раньше
-  // меню контактов открываем над своим видео, как только камера готова
-  let _mt=0; const _mi=setInterval(()=>{ if(inRoom){ openMenu(); clearInterval(_mi); } else if(++_mt>25){ clearInterval(_mi); } }, 250);
+  /* v60: запуск — сразу список контактов. Раньше приложение при каждом открытии
+     входило в общую комнату с камерой — и попадало в чужие разговоры («звонит не туда»). */
+  openStandby(bootExitMsg); bootExitMsg="";
 }
 
 /* ── привязка кнопок ── */
 function wireUI(){
   const bind=(id,fn)=>{ const el=$(id); if(el) el.onclick=fn; };
   bind("btnCallAll",()=>callGeneral(true));
-  bind("btnReturnRoom",()=>{ joinLobby(); if(!inRoom) enterMeeting(true); let _t=0; const _i=setInterval(()=>{ if(inRoom){ openMenu(); clearInterval(_i); } else if(++_t>25) clearInterval(_i); },250); });
+  bind("btnReturnRoom",()=>{ if(inRoom) show("scr-call"); });
+  bind("btnRingtone",()=>{
+    if(window.Android && Android.pickRingtone){ try{ Android.pickRingtone(); }catch(_){} return; }
+    const n=(webToneIdx()+1)%WEB_TONES.length; try{ localStorage.setItem("zvk_tone",String(n)); }catch(_){}
+    const el=$("ringName"); if(el) el.textContent=WEB_TONES[n].n;
+    primeAudio(); webBeep(n);
+  });
+  (function(){
+    const el=$("ringName"); if(el){ try{ el.textContent = (window.Android&&Android.ringtoneTitle) ? Android.ringtoneTitle() : WEB_TONES[webToneIdx()].n; }catch(_){} }
+    const cb=$("carAuto"); if(cb){
+      try{ cb.checked = localStorage.getItem("zvk_car_auto")==="1"; }catch(_){}
+      cb.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_car_auto", cb.checked?"1":"0"); }catch(_){} });
+      const row=$("carAutoRow"); if(row && !(window.Android)) row.style.display="none";
+    }
+  })();
   bind("menuGeneral",()=>callGeneral(true));
   bind("btnAccept",acceptCall);
   bind("btnDecline",declineCall);
-  bind("btnCancel",()=>{ if(outgoing){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:GENERAL_ROOM}); pushCancel(outgoing.to); } outgoing=null; backToWhereWeWere(); });
+  bind("btnCancel",()=>{ if(outgoing){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:outgoing.room||GENERAL_ROOM,cid:outgoing.cid||""}); pushCancel(outgoing.to); } clearInterval(ringRepeatT); ringRepeatT=null; outgoing=null; backToWhereWeWere(); });
   bind("meLine",renameMe); bind("menuMe",renameMe); bind("btnRename",renameMe);
   bind("btnTheme2",()=>applyTheme(document.body.classList.contains("light")?"dark":"light"));
   bind("btnReSlot",()=>{ if(confirm("Сменить, кто вы в группе? Звонки начнут приходить на другой контакт.")){ leaveLobby(); try{localStorage.removeItem("zvk_slot");}catch(_){} renderSetup(); show("scr-setup"); } });
@@ -2282,8 +2613,9 @@ function wireUI(){
   if(pu){ try{ pu.value=localStorage.getItem("zvk_push_url")||""; }catch(_){} bind("btnSavePush2",()=>{ try{ localStorage.setItem("zvk_push_url",(pu.value||"").trim()); }catch(_){} const sv=$("btnSavePush2"); if(sv){ sv.textContent="✓ Сохранено"; setTimeout(()=>sv.textContent="Сохранить пуш-сервер",1600);} }); }
   bind("btnIosPush",()=>{ if(window.__enableIosPush) window.__enableIosPush(); });
   bind("btnExit",()=>{ try{ if(window.Android&&Android.exitApp){ Android.exitApp(); return; } }catch(_){} try{ window.close(); }catch(_){} });
+  try{ const bx=$("btnExit"); if(bx && !(window.Android && Android.exitApp)) bx.style.display="none"; }catch(_){}
   bind("menuSettings",()=>{ openSettingsModal(); });
-  bind("setClose",()=>{ const sb=document.querySelector(".settings-body"); if(sb&&sb.classList.contains("float")) closeSettingsModal(); else { const d=document.querySelector("#scr-home details"); if(d) d.open=false; } });
+  bind("setClose",()=>{ const sb=document.querySelector(".settings-body"); if(!sb) return; if(sb.classList.contains("float")) closeSettingsModal(); const d=sb.closest("details"); if(d) d.open=false; });
   try{ netWire(); }catch(_){}
   const fr=$("forceRelay2");
   if(fr){ try{ fr.checked = forceRelay(); }catch(_){} fr.addEventListener("change",()=>{ try{ localStorage.setItem("zvk_force_relay", fr.checked?"1":"0"); }catch(_){}
@@ -2314,10 +2646,43 @@ setInterval(function(){
   }catch(_){}
 }, 8000);
 
-/* прихожая может «уснуть» в фоне — поднимаем заново при возврате в приложение */
+/* прихожая может «уснуть» в фоне — поднимаем заново при возврате в приложение;
+   в разговоре: ушли с экрана — камера на паузу, вернулись — снова видео */
 document.addEventListener("visibilitychange", ()=>{
-  if(document.visibilityState==="visible" && getMySlot() && !lobby){ joinLobby(); }
+  if(document.visibilityState==="visible"){
+    clearTimeout(scrT);
+    if(scrPaused||scrAudio) screenOn();
+    if(getMySlot() && !lobby) joinLobby();
+  } else if(inRoom && window.Android){
+    clearTimeout(scrT); scrT=setTimeout(()=>{ if(document.hidden) screenOff(); }, 1500);
+  }
 });
+
+/* ───────────── Сигналы от системы Android ───────────── */
+function safeDecode(x){ try{ return decodeURIComponent(x); }catch(_){ return x; } }
+window.__nativeIncoming=function(o){ try{ o=o||{}; const from=+o.caller||0; if(!from) return;
+  onRing({ t:"call", from, to: o.all?0:(+o.to||getMySlot()), video:o.video!==false, name:o.name||slotName(from) }); }catch(_){} };
+window.__pushRing=function(o){ try{ onRing(o||{}); }catch(_){} };
+window.__nativeAnswer=function(o){ try{
+  o=o||{}; const v=(typeof o.video==="boolean")?o.video:true;
+  if(incoming){ acceptCall(v); return; }
+  if(inRoom) return;
+  const from=+o.caller||0; const all=!!o.all; if(!from && !all) return;
+  incoming={ from, to: all?0:(+o.to||getMySlot()), video:v, all, name:o.name||slotName(from), room:guessRoom(from, all), cid:"", guessed:true };
+  acceptCall(v);
+}catch(_){} };
+window.__nativeDecline=function(){ if(incoming) declineCall(); };
+window.__nativeHangup=function(){ if(inRoom) leaveMeeting("Звонок завершён"); else if(incoming) declineCall(); };
+window.__nativeMissed=function(){ if(incoming){ markHandled(incoming); hideIncoming(); backToWhereWeWere(); } };
+let holdMic=null;
+window.__telecomHold=function(on){
+  if(!localStream) return;
+  if(on){ holdMic=localStream.getAudioTracks().map(t=>t.enabled); localStream.getAudioTracks().forEach(t=>t.enabled=false); }
+  else if(holdMic){ localStream.getAudioTracks().forEach((t,i)=>t.enabled=(holdMic[i]!==false)); holdMic=null; }
+  document.querySelectorAll("#grid .tile:not(.me) video").forEach(v=>{ v.muted=!!on; });
+  updateCtlIcons(); toast(on?"⏸ Звонок на удержании":"▶ Разговор продолжается");
+};
+window.__ringtonePicked=function(t){ const el=$("ringName"); if(el) el.textContent=t||""; if(t) toast("🔔 Мелодия: "+t); };
 
 /* ───────────── Запуск ───────────── */
 renderRooms();
@@ -2335,12 +2700,14 @@ if (location.protocol === "file:"){
   $("fileWarning").style.display = "block";
 }
 /* сообщение после выхода (страница перезагрузилась начисто) */
+let bootExitMsg = "";
 (function(){
   try{
     const ex = sessionStorage.getItem("zvk_exit");
     if (ex){
       sessionStorage.removeItem("zvk_exit");
       const d = JSON.parse(ex);
+      bootExitMsg = d.msg || "";
       setHomeStatus(d.msg || "Вы вышли из комнаты.", d.err ? "err" : "ok");
     }
   }catch(_){}
@@ -2369,26 +2736,38 @@ if (location.protocol === "file:"){
   const prime=()=>{ primeAudio(); document.removeEventListener("touchend",prime); document.removeEventListener("click",prime); };
   document.addEventListener("touchend",prime,{passive:true});
   document.addEventListener("click",prime);
-  if(window.__rejoining){ joinLobby(); return; }   // идёт авто-возврат в комнату после переподключения
+  const ready=()=>{ try{ if(window.Android&&Android.pageReady) Android.pageReady(); }catch(_){} };
+  if(window.__rejoining){ joinLobby(); ready(); return; }   // идёт авто-возврат в комнату после переподключения
   document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
-  if(!getMySlot()){ renderSetup(); show("scr-setup"); return; }
+  if(!getMySlot()){ renderSetup(); show("scr-setup"); ready(); return; }
   reportSlot();
-  try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}   // открылись из звонка — гасим системный рингтон
   if (__P.get("incoming")==="1"){                 // открылись из пуша — показываем экран входящего
     const c = +(__P.get("caller")||0);
+    const all = __P.get("all")==="1";
     const nm = __P.get("name");
-    incoming = { from:c, video: __P.get("video")!=="0", all: c===0, name: nm?decodeURIComponent(nm):slotName(c) };
-    wokenForCall=true; joinLobby(); showIncoming();
+    joinLobby();
+    incoming = { from:c, to: all?0:(+(__P.get("to")||0)||getMySlot()), video: __P.get("video")!=="0", all,
+                 name: nm?safeDecode(nm):slotName(c), room: guessRoom(c, all), cid:"", guessed:true };
+    showIncoming(); ready();
     return;
   }
-  if (__P.get("autojoin")==="1"){                 // нажали «Ответить» — сразу в комнату
-    const cn = __P.get("name"); if(cn){ try{ callLabel=decodeURIComponent(cn); }catch(_){ callLabel=cn; } }
+  if (__P.get("autojoin")==="1"){                 // нажали «Ответить» (или переподключение через реле)
+    const c = +(__P.get("caller")||0);
+    const all = __P.get("all")==="1";
+    const relay = __P.get("relay")==="1";
+    const video = __P.get("video")!=="0" && !isCar();
+    const cn = __P.get("name"); callLabel = all ? "Общий созвон" : (cn ? safeDecode(cn) : "");
+    const rp = __P.get("room"); const roomP = rp ? safeDecode(rp) : "";
+    const room = isRoomName(roomP) ? roomP : guessRoom(c, all);
+    if(!relay && !isRoomName(roomP) && (c || all)) acceptedGuess={ from:c, until:Date.now()+40000 };
     show("scr-call");                              // не чёрный экран, пока включается камера
     try{ $("waitOverlay").style.display="flex"; setWaitStatus("Подключаюсь…"); }catch(_){}
-    joinLobby(); enterMeeting(__P.get("video")!=="0");
-    setTimeout(()=>{ if(inRoom) openMenu(); }, 600);
+    if(!relay){ try{ if(window.Android&&Android.callAnswered) Android.callAnswered(video); }catch(_){} }
+    joinLobby(); enterMeeting(video, room); ready();
   } else {
-    startApp();                                   // обычный запуск: сразу в комнату + меню
+    try{ if(window.Android&&Android.stopRing) Android.stopRing(); }catch(_){}
+    try{ if(window.Android&&Android.setInCall) Android.setInCall(false); }catch(_){}   // после перезагрузки звонка нет
+    startApp(); ready();                          // обычный запуск: список контактов
   }
 })();
 
