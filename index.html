@@ -168,6 +168,7 @@
 
   /* ─── режим «миниатюра» (картинка-в-картинке при сворачивании приложения) ─── */
   #scr-call.pipmode .topbar, #scr-call.pipmode .controls, #scr-call.pipmode #toast{display:none}
+  #scr-call .controls .ctl{rotate:var(--uirot,0deg);transition:rotate .25s ease,transform .08s,background .15s}
   #scr-call.pipmode #grid{padding:2px !important;gap:2px}
   #scr-call.pipmode .tile{border-radius:6px}
   #scr-call.pipmode .tile .name{display:none}
@@ -728,10 +729,13 @@ function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.r
 function setHomeStatus(msg, cls){ const el=$("homeStatus"); el.textContent=msg||""; el.className="status"+(cls?" "+cls:""); }
 function setWaitStatus(t){ const el=$("waitStatus"); if (el) el.textContent = t || ""; }
 let toastT = null;
-function toast(msg){
+function toast(msg, ms){
   const el = $("toast"); el.textContent = msg; el.classList.add("on");
-  clearTimeout(toastT); toastT = setTimeout(()=> el.classList.remove("on"), 2600);
+  clearTimeout(toastT); toastT = setTimeout(()=> el.classList.remove("on"), ms || 2600);
 }
+window.__micBlocked = function(){
+  toast("Пока экран был выключен, телефон отключал микрофон. Включите: Настройки → Приложения → Звонок → Батарея → «Разрешить фоновую активность»", 9000);
+};
 function roomIdFromName(name){
   const s = name.trim().toLowerCase().replace(/\s+/g," ");
   let h1 = 5381, h2 = 52711;
@@ -812,6 +816,7 @@ async function enterRoom(name, video){
   }
   catch(e){
     if (session !== gen0) return;
+    try{ if(window.Android && Android.setInCall) Android.setInCall(false); }catch(_){}
     outgoing = null; clearTimeout(outTimer);
     inRoom = false;
     openStandby(explainMediaError(e));
@@ -819,6 +824,7 @@ async function enterRoom(name, video){
   }
 
   inRoom = true;
+  camStartRot();
   try{ if(window.Android && Android.setInCall) Android.setInCall(true); }catch(_){}
   const s = ++session;
   peers = new Map();
@@ -869,6 +875,7 @@ function joinAll(s){
         if (d.name) setMemberName(ctx.peerId, String(d.name).slice(0,20));
         const p = peers.get(ctx.peerId);
         if (p && typeof d.vid === "boolean") p.hasVideo = d.vid;
+        if (p && typeof d.rot === "number"){ const r = ((Math.round(d.rot / 90) * 90) % 360 + 360) % 360; if (p.rot !== r){ p.rot = r; if (p.tile) fitTile(p.tile); } }
       };
       needAct.onMessage = (d, ctx) => {
         /* собеседник не получил наш поток — пересылаем с чистого листа */
@@ -913,7 +920,7 @@ function trackPeer(id, rec){
         hasVideo: true, nudges: 0, retryT: [] };
   peers.set(id, p);
   hadPeer = true;
-  rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) }, id);
+  rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length), rot: myRot() }, id);
   if (audioOnly) rec.sendMode({ audioOnly: true, reason: (audioCar?"car":"")+(audioTurn?"turn":"") }, id);
   /* СЕРИАЛИЗАЦИЯ ПЕРЕГОВОРОВ: чтобы видео-предложения двух сторон не сталкивались
      (из-за чего видео шло только в одну сторону), первым поток отправляет тот,
@@ -1077,7 +1084,7 @@ function onTrackedLeave(id){
     if (pcs && pcs[id]){
       p.rec = rec; p.gotStream = false; p.sentStream = false; p.nudges = 0; p.pcHooked = false;
       sendStreamTo(p, id);
-      rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) }, id);
+      rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length), rot: myRot() }, id);
       return;
     }
   }
@@ -1171,6 +1178,7 @@ function setupCallScreen(){
 function makeTile(id, isMe){
   const tile = document.createElement("div");
   tile.className = "tile" + (isMe ? " me" : "");
+  if (!isMe) tile.dataset.pid = id;
   const video = document.createElement("video");
   video.autoplay = true; video.playsInline = true; if (isMe) video.muted = true;
   const novid = document.createElement("div");
@@ -1179,6 +1187,7 @@ function makeTile(id, isMe){
   name.className = "name"; name.textContent = isMe ? (myName + " (вы)") : "Участник";
   tile.append(video, novid, name);
   video.addEventListener("resize", ()=> fitTile(tile));
+  if (isMe) video.addEventListener("resize", ()=> scheduleCamCheck(700));
   video.addEventListener("loadedmetadata", ()=> fitTile(tile));
   if (isMe){
     /* нажатие на своё имя — сменить его */
@@ -1607,6 +1616,7 @@ async function applyNewCamera(ns){
      молча игнорирует замену) — точечно пере-отправляем поток. */
   if (peers.size > 0) setTimeout(verifyOutboundVideo, 2500);
   reportVideo();
+  try{ camStartRot(); sendMyRot(); }catch(_){}
   return true;
 }
 async function verifyOutboundVideo(){
@@ -1638,21 +1648,110 @@ let orientT=null;
 /* Поворот: камеру не перезапускаем — система сама поворачивает кадр. Подстраиваем
    только показ: картинка другой ориентации показывается целиком (с полями),
    а не обрезается; миниатюра принимает форму кадра. */
+/* Телефон держат боком, а экран не поворачивается (на телефоне портрет закреплён,
+   на планшете бывает выключен автоповорот) — камера отдаёт кадр «как в портрете»,
+   и у собеседника картинка лежит на боку. Android сообщает, на сколько повёрнут
+   телефон относительно экрана (devRot); собеседнику передаём, на сколько повернуть
+   нашу картинку (rot), а входящее видео поворачиваем под то, как держат наш телефон. */
+let devRot = 0;                       // на сколько устройство повёрнуто относительно экрана (по часовой)
+let dispRot = 0, natLand = false;      // поворот экрана; «родное» положение альбомное (планшет)
+let camD = 0, camCached = false, camOff = false, camChkT = null;
+function normRot(x){ return ((Math.round((+x || 0) / 90) * 90) % 360 + 360) % 360; }
+function dispLand(){ return natLand !== (dispRot % 180 === 90); }
+/* По какому положению экрана камера на самом деле поворачивает кадр. Обычно — по текущему.
+   На некоторых планшетах (Galaxy Tab) камера «застревает» в положении, в котором её включили:
+   экран повернулся, а кадр — нет. Это видно по своему же кадру: он перестаёт совпадать
+   с экраном по форме (альбомный/портретный). Тогда считаем от положения при включении. */
+function chromeD(){
+  if (camCached) return camD;
+  if (!camOff) return dispRot;
+  return (((0 - dispRot) % 180 + 180) % 180 === 90) ? 0 : (dispRot + 90) % 360;
+}
+function selfCorr(){ return ((chromeD() - dispRot) % 360 + 360) % 360; }   // поправка своего изображения
+function camStartRot(){
+  try{ if (window.Android && Android.dispRot){ const a = String(Android.dispRot()).split(","); dispRot = normRot(a[0]); natLand = a[1] === "1"; } }catch(_){}
+  camD = dispRot; camCached = false; camOff = false;
+  scheduleCamCheck(1500);
+}
+function checkCam(){
+  if (!window.Android || !inRoom) return;
+  const sc = $("scr-call"); if (sc && sc.classList.contains("pipmode")) return;
+  const v = document.querySelector('#grid .tile[data-me="1"] video');
+  if (!v || !localVideoLive()) return;
+  const w = v.videoWidth, h = v.videoHeight; if (!w || !h || w === h) return;
+  const before = myRot() + "|" + selfCorr();
+  camOff = (w > h) !== dispLand();
+  if (((camD - dispRot) % 180 + 180) % 180 === 90) camCached = camOff;
+  if (before !== myRot() + "|" + selfCorr()){ sendMyRot(); fitAll(); }
+}
+function scheduleCamCheck(ms){ clearTimeout(camChkT); camChkT = setTimeout(checkCam, ms || 1200); }
+function camIsFront(){
+  try{
+    const t = localStream && localStream.getVideoTracks()[0];
+    if (t){
+      const st = t.getSettings ? (t.getSettings() || {}) : {};
+      if (st.facingMode === "user") return true;
+      if (st.facingMode === "environment") return false;
+      const lb = String(t.label || "").toLowerCase();
+      if (/front|фронт/.test(lb)) return true;
+      if (/back|rear|задн/.test(lb)) return false;
+    }
+  }catch(_){}
+  return facing === "user";
+}
+function myRot(){
+  const qc = ((devRot - dispRot + chromeD()) % 360 + 360) % 360;    // как камера на самом деле повёрнута относительно мира
+  return qc ? (camIsFront() ? (360 - qc) % 360 : qc) : 0;
+}
+function sendMyRot(){ const r = myRot(); for (const [pid, p] of peers){ try{ p.rec.sendMeta({ name: myName, rot: r }, pid); }catch(_){} } }
+function tileAngle(tile){
+  if (!tile) return 0;
+  if (tile.dataset.me) return selfCorr();
+  const p = peers.get(tile.dataset.pid);
+  const r = (p && typeof p.rot === "number") ? p.rot : 0;
+  return ((r - devRot) % 360 + 360) % 360;
+}
+function rotVideo(v, tile, ang){
+  const st = v.style;
+  const mir = (tile.dataset.me && !tile.classList.contains("rear")) ? " scaleX(-1)" : "";   // своё изображение — зеркально
+  if (!ang){ if (v.dataset.rot){ st.position = st.left = st.top = st.width = st.height = st.transform = ""; delete v.dataset.rot; } return; }
+  v.dataset.rot = String(ang);
+  if (ang === 180){ st.position = st.left = st.top = st.width = st.height = ""; st.transform = "rotate(180deg)" + mir; return; }
+  st.position = "absolute"; st.left = "50%"; st.top = "50%";
+  st.width = tile.clientHeight + "px"; st.height = tile.clientWidth + "px";      // после поворота займёт всю плитку
+  st.transform = "translate(-50%,-50%) rotate(" + ang + "deg)" + mir;
+}
+function rotateCtls(){ const sc = $("scr-call"); if (sc) sc.style.setProperty("--uirot", (devRot === 270 ? 90 : -devRot) + "deg"); }
+window.__devRot = function(q, d, nl){
+  q = normRot(q);
+  const dd = (d === undefined || d === null) ? dispRot : normRot(d);
+  if (nl !== undefined && nl !== null) natLand = !!(+nl);
+  const dChanged = dd !== dispRot;
+  if (q === devRot && !dChanged) return;
+  devRot = q; dispRot = dd;
+  sendMyRot(); fitAll(); rotateCtls();
+  if (dChanged) scheduleCamCheck(1200);          // экран повернулся — смотрим, повернулся ли кадр камеры
+};
 function fitTile(tile){
   if (!tile) return;
   const v = tile.querySelector("video"); if (!v) return;
-  const vw = v.videoWidth, vh = v.videoHeight; if (!vw || !vh) return;
-  const g = $("grid");
-  const mini = g.classList.contains("haszoom") && !tile.classList.contains("zoom");
-  if (mini){
-    tile.style.aspectRatio = vw + " / " + vh;
-    tile.style.width = (vw > vh ? 150 : 104) + "px";
-    tile.classList.remove("fit");
-    return;
+  const ang = tileAngle(tile), side = (ang === 90 || ang === 270);
+  const vw0 = v.videoWidth, vh0 = v.videoHeight;
+  if (vw0 && vh0){
+    const vw = side ? vh0 : vw0, vh = side ? vw0 : vh0;             // как картинка ляжет после поворота
+    const g = $("grid");
+    const mini = g.classList.contains("haszoom") && !tile.classList.contains("zoom");
+    if (mini){
+      tile.style.aspectRatio = vw + " / " + vh;
+      tile.style.width = (vw > vh ? 150 : 104) + "px";
+      tile.classList.remove("fit");
+    } else {
+      tile.style.aspectRatio = ""; tile.style.width = "";
+      const tw = tile.clientWidth, th = tile.clientHeight;
+      if (tw && th) tile.classList.toggle("fit", (vw > vh) !== (tw > th));
+    }
   }
-  tile.style.aspectRatio = ""; tile.style.width = "";
-  const tw = tile.clientWidth, th = tile.clientHeight; if (!tw || !th) return;
-  tile.classList.toggle("fit", (vw > vh) !== (tw > th));
+  rotVideo(v, tile, ang);
 }
 function fitAll(){ document.querySelectorAll("#grid .tile").forEach(fitTile); }
 function clampMinis(){
