@@ -825,6 +825,7 @@ async function enterRoom(name, video){
 
   inRoom = true;
   camStartRot();
+  try{ if (window.Android && ((Android.isScreenOn && !Android.isScreenOn()) || document.hidden)){ clearTimeout(scrT); scrT = setTimeout(screenOff, 800); } }catch(_){}
   try{ if(window.Android && Android.setInCall) Android.setInCall(true); }catch(_){}
   const s = ++session;
   peers = new Map();
@@ -875,6 +876,7 @@ function joinAll(s){
         if (d.name) setMemberName(ctx.peerId, String(d.name).slice(0,20));
         const p = peers.get(ctx.peerId);
         if (p && typeof d.vid === "boolean") p.hasVideo = d.vid;
+        if (p && typeof d.novid === "boolean") pauseVideoTo(ctx.peerId, d.novid);
         if (p && typeof d.rot === "number"){ const r = ((Math.round(d.rot / 90) * 90) % 360 + 360) % 360; if (p.rot !== r){ p.rot = r; if (p.tile) fitTile(p.tile); } }
       };
       needAct.onMessage = (d, ctx) => {
@@ -883,7 +885,9 @@ function joinAll(s){
         resendStreamTo(ctx.peerId);
       };
       modeAct.onMessage = (d, ctx) => {
-        if (s === session && d && typeof d.audioOnly === "boolean") applyAudioOnly(d.audioOnly, false, d.reason);
+        if (s !== session || !d || typeof d.audioOnly !== "boolean") return;
+        if (d.audioOnly && peers.size > 1 && d.reason && /^(car)?(scr)?$/.test(d.reason)) return;   // в группе — только «нам не шлют видео»
+        applyAudioOnly(d.audioOnly, false, d.reason);
       };
       wireRoom(rec, s);
       rooms.push(rec);
@@ -920,8 +924,12 @@ function trackPeer(id, rec){
         hasVideo: true, nudges: 0, retryT: [] };
   peers.set(id, p);
   hadPeer = true;
-  rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length), rot: myRot() }, id);
-  if (audioOnly) rec.sendMode({ audioOnly: true, reason: (audioCar?"car":"")+(audioTurn?"turn":"") }, id);
+  rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) && !scrPaused, rot: myRot() }, id);
+  const autoA = audioOnly && (audioScr || audioCar) && !audioTurn;   // «только звук» включился сам — это для двоих
+  if (audioOnly && !(autoA && peers.size > 1)) rec.sendMode({ audioOnly: true, reason: (audioCar?"car":"")+(audioTurn?"turn":"")+(audioScr?"scr":"") }, id);
+  dropAutoAudio();
+  if (noVidSent) rec.sendMeta({ name: myName, novid: true }, id);
+  if (scrIsOff) setTimeout(applyScrAudio, 0);
   /* СЕРИАЛИЗАЦИЯ ПЕРЕГОВОРОВ: чтобы видео-предложения двух сторон не сталкивались
      (из-за чего видео шло только в одну сторону), первым поток отправляет тот,
      чей идентификатор меньше; второй отвечает своим потоком после получения */
@@ -938,7 +946,7 @@ function trackPeer(id, rec){
      просим его переслать поток заново и пересылаем свой */
   for (const delay of [6000, 12000, 20000]){
     p.retryT.push(setTimeout(()=>{
-      if (sess !== session || peers.get(id) !== p || audioOnly || p.nudges >= 4) return;
+      if (sess !== session || peers.get(id) !== p || audioOnly || noVidSent || p.nudges >= 4) return;
       const v = p.tile && p.tile.querySelector("video");
       const framesOk = v && v.videoWidth > 0;
       if (!p.gotStream || (p.hasVideo && !framesOk)){
@@ -983,6 +991,7 @@ function sendStreamTo(p, id){
   if (p.sentStream || !localStream) return;
   p.sentStream = true;
   try{ p.rec.room.addStream(localStream, { target: id }); }catch(_){}
+  if (p.novid) pauseVideoTo(id, true);   // поток переслали — просьба «без видео» в силе
   watchConnection(p, id);
 }
 /* следим за состоянием канала к конкретному участнику и чиним обрывы */
@@ -1038,7 +1047,7 @@ function watchConnection(p, id){
     if (p.tile && p.gotStream){
       const v = p.tile.querySelector("video");
       const connected = pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed");
-      if (v && v.videoWidth > 0 && connected && p.hasVideo && !document.hidden){
+      if (v && v.videoWidth > 0 && connected && p.hasVideo && !document.hidden && !noVidSent){
         const ct = v.currentTime;
         if (p.lastVT != null && Math.abs(ct - p.lastVT) < 0.05){
           p.freezeN = (p.freezeN || 0) + 1;
@@ -1060,6 +1069,7 @@ function watchConnection(p, id){
         p.freezeN = 0; p.lastVT = null;
       }
     }
+    if (p.novid) pauseVideoTo(id, true);    // просьба «без видео» держится (после пересогласований)
     p.watchT = setTimeout(tick, 2000);
   };
   tick();
@@ -1071,6 +1081,7 @@ function resendStreamTo(id){
   setTimeout(()=>{
     if (peers.get(id) !== p || !localStream) return;
     try{ p.rec.room.addStream(localStream, { target: id }); p.sentStream = true; }catch(_){}
+    if (p.novid) pauseVideoTo(id, true);
   }, 250);
 }
 function onTrackedLeave(id){
@@ -1084,7 +1095,7 @@ function onTrackedLeave(id){
     if (pcs && pcs[id]){
       p.rec = rec; p.gotStream = false; p.sentStream = false; p.nudges = 0; p.pcHooked = false;
       sendStreamTo(p, id);
-      rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length), rot: myRot() }, id);
+      rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) && !scrPaused, rot: myRot() }, id);
       return;
     }
   }
@@ -1133,6 +1144,7 @@ function dropPeer(id){
   peers.delete(id);
   updateCount(); relayout();
   if (inRoom && peers.size === 0 && hadPeer){ hadPeer = false; onAloneAfterCall(); }
+  else if (inRoom && scrIsOff && peers.size === 1) setTimeout(applyScrAudio, 0);
 }
 
 /* следим за живостью каналов; если все умерли — переподключаемся */
@@ -1357,8 +1369,8 @@ function stopTimer(){ clearInterval(timerInt); timerInt = null; statsStop(); }
 /* ───────── Счётчики трафика + сторож зависания (восстановление связи) ───────── */
 let statsInt = null;
 let NET = null;
-let audioCar=false, audioTurn=false;
-function netReset(){ NET = { totalRx:0,totalTx:0, prevRawRx:0,prevRawTx:0, prevTs:0, curRx:0,curTx:0, relay:"—", lastRxGrow:Date.now(), lastRxVal:0, turnFlagged:false, carFlagged:false }; audioCar=false; audioTurn=false; }
+let audioCar=false, audioTurn=false, audioScr=false;   // audioScr: «только звук» из-за погасшего экрана (своего или собеседника)
+function netReset(){ NET = { totalRx:0,totalTx:0, prevRawRx:0,prevRawTx:0, prevTs:0, curRx:0,curTx:0, relay:"—", lastRxGrow:Date.now(), lastRxVal:0, turnFlagged:false, carFlagged:false }; audioCar=false; audioTurn=false; audioScr=false; }
 /* в автомобиле (Android Auto)? — через нативный мост; на десктопе/iPhone — нет */
 function isCar(){ try{ if(window.Android && Android.isCar) return !!Android.isCar(); }catch(_){} return false; }
 /* месячный расход TURN: лимит ExpressTURN 1000 ГБ, период сбрасывается 3-го числа */
@@ -1418,6 +1430,9 @@ function netTick(){
       NET.carFlagged=true; try{ applyAudioOnly(true,true,"car"); }catch(_){}
       toast("Звонок в автомобиле — оставил только звук");
     }
+    // в машине в общем разговоре: остальные видят друг друга, а нам видео не шлют
+    if (inRoom && peers.size > 1 && !noVidSent && isCar()){ setNoVid(true); toast("Звонок в автомобиле — только звук"); }
+    else if (inRoom && noVidSent && !scrIsOff && !isCar()) setNoVid(false);
     // Сторож «по байтам» убран: в аудио тишина (пауза в разговоре) давала ложные
     // срабатывания и рвала связь. Переподключением занимается watchConnection —
     // по реальному состоянию ICE (disconnected/failed), с паузой ~7 сек.
@@ -1504,9 +1519,10 @@ function applyAudioOnly(on, broadcast, reason){
   if (audioOnly === on && !broadcast && reason===undefined){ updateAudioBadges(); return; }
   audioOnly = on;
   const scrR = !!(reason && reason.indexOf("scr")>=0);
-  if (!on){ audioCar=false; audioTurn=false; }
-  else if (reason){ if(reason.indexOf("car")>=0) audioCar=true; if(reason.indexOf("turn")>=0) audioTurn=true; }
-  if (localStream) localStream.getVideoTracks().forEach(t=> t.enabled = !on);
+  if (!on){ audioCar=false; audioTurn=false; audioScr=false; }
+  else if (reason){ if(reason.indexOf("car")>=0) audioCar=true; if(reason.indexOf("turn")>=0) audioTurn=true; if(scrR) audioScr=true; }
+  else audioScr=false;                     // включили вручную — это уже не «из-за экрана»
+  if (localStream) localStream.getVideoTracks().forEach(t=> t.enabled = !on && !camUserOff);
   const me = document.querySelector('.tile[data-me="1"]');
   if (me) refreshTileVideo(me, localStream);
   updateModeBtn(); updateCtlIcons(); updateAudioBadges();
@@ -1520,6 +1536,10 @@ function applyAudioOnly(on, broadcast, reason){
     toast("📵 У собеседника погас экран — пока только звук");
   }
   reportVideo();
+  if (!on && inRoom){
+    if (scrIsOff) setTimeout(applyScrAudio, 400);
+    else if (scrPaused) setTimeout(()=>{ if (scrPaused && !scrIsOff && !audioOnly) screenOn(); }, 0);
+  }
 }
 function updateModeBtn(){
   const b = $("btnMode");
@@ -1531,25 +1551,73 @@ function updateModeBtn(){
    Экран погас (кнопкой или приложение ушло в фон без «картинки в картинке»):
    камера останавливается (батарея), собеседник видит аватар; в разговоре вдвоём
    видео ставится на паузу у обоих (трафик). Экран включился — всё возвращается. */
-let scrPaused=null, scrAudio=false, scrT=null;
+let scrPaused=null, scrAudio=false, scrT=null, scrIsOff=false, noVidSent=false;
+let camUserOff=false;      // камеру выключили кнопкой 📹 — сама она не включается
 function localVideoLive(){ return !!(localStream && localStream.getVideoTracks().some(t=>t.readyState==="live" && t.enabled)); }
 function reportVideo(){ try{ if(window.Android&&Android.setVideoActive) Android.setVideoActive(!!(inRoom && !audioOnly && !scrPaused && localVideoLive())); }catch(_){} }
+/* в группе: пока у нас экран выключен, просим каждого не слать нам видео */
+function setNoVid(on){
+  if (noVidSent === on) return;
+  noVidSent = on;
+  for (const [pid, p] of peers){ try{ p.rec.sendMeta({ name: myName, novid: on }, pid); }catch(_){} }
+}
+/* собеседник просит не слать ему видео — выключаем отправку видео только ему */
+function pauseVideoTo(pid, off, tries){
+  const p = peers.get(pid); if (!p) return;
+  if (tries === undefined){ p.novid = !!off; clearTimeout(p.novidT); tries = 0; }
+  else if (p.novid !== !!off) return;                    // просьба сменилась — старый повтор не нужен
+  let pending = false;
+  try{
+    const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null;
+    const pc = pcs && pcs[pid];
+    const vs = (pc && pc.getSenders) ? pc.getSenders().filter(snd => snd.track && snd.track.kind === "video" && snd.getParameters) : [];
+    if (!vs.length && off && p.sentStream && localStream && localStream.getVideoTracks().length) pending = true;   // поток ещё в пути
+    vs.forEach(snd => {
+      const prm = snd.getParameters();
+      if (!prm.encodings || !prm.encodings.length){ pending = true; return; }   // ещё согласуется
+      if (prm.encodings.every(e => e.active === !off)) return;
+      prm.encodings.forEach(e => { e.active = !off; });
+      pending = true;                                      // проверим на следующем шаге, что встало
+      const r = snd.setParameters(prm); if (r && r.catch) r.catch(()=>{});
+    });
+  }catch(_){ pending = true; }
+  if (pending && tries < 40) p.novidT = setTimeout(()=>pauseVideoTo(pid, off, tries + 1), 150);
+}
+/* экран выключен: вдвоём — «только звук» у обоих; в группе — нам видео не шлют */
+function applyScrAudio(){
+  if (!scrIsOff || !inRoom) return;
+  if (peers.size === 1){ if (!audioOnly){ scrAudio = true; applyAudioOnly(true, true, "scr"); } }
+  else if (peers.size > 1){ setNoVid(true); dropAutoAudio(); }
+}
+/* людей стало больше двух — «только звук» из-за экрана/машины снимаем у себя (так делает каждый) */
+function dropAutoAudio(){
+  if (!(audioOnly && (audioScr || audioCar) && !audioTurn && peers.size > 1)) return;
+  scrAudio = false;
+  if (NET) NET.carFlagged = false;        // снова вдвоём в машине — режим включится заново
+  applyAudioOnly(false, false, "auto");
+}
 function screenOff(){
-  if(!inRoom || scrPaused || !localStream) return;
-  if(localVideoLive() && !audioOnly){
+  if(!inRoom) return;
+  scrIsOff = true;
+  if(!scrPaused && localStream && localVideoLive()){        // своя камера — стоп (батарея; в фоне она всё равно недоступна)
     const t=localStream.getVideoTracks()[0];
     const st=(t && t.getSettings && t.getSettings()) || {};
     scrPaused={ deviceId: st.deviceId || null, facing };
     try{ t.enabled=false; t.stop(); }catch(_){}
     for(const [pid,p] of peers) p.rec.sendMeta({ name: myName, vid:false }, pid);
-    if(peers.size===1){ scrAudio=true; applyAudioOnly(true, true, "scr"); }
   }
+  applyScrAudio();
   reportVideo();
 }
 async function screenOn(){
   if(!inRoom) return;
-  const sp=scrPaused; scrPaused=null;
+  scrIsOff = false;
+  if (!isCar()) setNoVid(false);           // в машине видео нам по-прежнему не шлют
+  /* «только звук» включён не из-за экрана (машина, ручной, плохая сеть) — камеру не будим */
+  const keepAudio = audioOnly && (audioCar || audioTurn || !scrAudio);
+  const sp = keepAudio ? null : scrPaused;
   if(sp){
+    scrPaused=null;
     let ns=null;
     const base={ width:{ideal:960}, height:{ideal:540}, frameRate:{ideal:24,max:27} };
     if(sp.deviceId){ try{ ns=await gumTimeout({ video:Object.assign({ deviceId:{exact:sp.deviceId} }, base), audio:false }, 8000); }catch(_){} }
@@ -1562,7 +1630,7 @@ async function screenOn(){
   updateCtlIcons(); reportVideo();
 }
 window.__screen=function(on){
-  if(on){ if(!document.hidden){ clearTimeout(scrT); if(scrPaused||scrAudio) screenOn(); } }
+  if(on){ if(!document.hidden){ clearTimeout(scrT); if(scrPaused||scrAudio||scrIsOff) screenOn(); } }
   else if(inRoom){ clearTimeout(scrT); scrT=setTimeout(screenOff, 600); }
 };
 
@@ -1571,6 +1639,7 @@ function toggleMic(){ if(!localStream) return; localStream.getAudioTracks().forE
 function toggleCam(){
   if(!localStream) return;
   localStream.getVideoTracks().forEach(t=>t.enabled=!t.enabled);
+  camUserOff = !localStream.getVideoTracks().some(t=>t.enabled);
   const me = document.querySelector('.tile[data-me="1"]');
   if (me) refreshTileVideo(me, localStream);
   updateCtlIcons(); reportVideo();
@@ -1596,7 +1665,7 @@ async function applyNewCamera(ns){
   const nt = ns.getVideoTracks()[0];
   if (!nt) return false;
   const ot = localStream.getVideoTracks()[0];
-  nt.enabled = !audioOnly;
+  nt.enabled = !audioOnly && !camUserOff;
 
   /* 1) Штатная замена видеодорожки у каждого собеседника — без пересогласования,
      соединение не трогается вовсе. */
@@ -2334,6 +2403,8 @@ let hadPeer = false;              // был ли в этом разговоре 
 let lobbyNames = (function(){ try{ const o=JSON.parse(localStorage.getItem("zvk_lobnames")||"{}"); return (o&&typeof o==="object")?o:{}; }catch(_){ return {}; } })();
 function saveLobbyNames(){ try{ localStorage.setItem("zvk_lobnames", JSON.stringify(lobbyNames)); }catch(_){} }
 function displayName(slot){ return lobbyNames[slot] || slotName(slot); }
+/* имя звонящего: пустое, «Контакт N» или «Общий созвон» (это не имя) — берём из списка */
+function callerName(n, from){ n = String(n || "").trim(); if (!n || isPlaceholderName(n) || n === "Общий созвон") return from ? displayName(from) : (n || ""); return n; }
 
 /* ── рингтон: на Android звонит система (громкость звонка, беззвучный режим, своя мелодия);
    в браузере/на iPhone — синтез, 4 варианта на выбор ── */
@@ -2469,7 +2540,7 @@ function onRing(d){
       }
       return;
     }
-    incoming={ from, to, video:(d.video!==false && d.video!==0), all:(to===0), name:d.name||slotName(from),
+    incoming={ from, to, video:(d.video!==false && d.video!==0), all:(to===0), name:callerName(d.name, from),
                room, cid:d.cid||"", guessed:!isRoomName(d.room) };
     showIncoming();
   }
@@ -2590,7 +2661,7 @@ function leaveMeetingCore(){
   setTimeout(()=>{ oldRooms.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
   try{ clearInterval(window.__spkPoll); window.__spkPoll=null; }catch(_){}
   try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
-  peers=new Map(); hadPeer=false; scrPaused=null; scrAudio=false; clearTimeout(scrT);
+  peers=new Map(); hadPeer=false; scrPaused=null; scrAudio=false; scrIsOff=false; noVidSent=false; camUserOff=false; clearTimeout(scrT);
   try{ if(localStream){ localStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){} }); } }catch(_){}
   localStream=null; inRoom=false; try{ stopTimer(); }catch(_){}
   try{ sessionStorage.removeItem("zvk_auto_relay"); }catch(_){}
@@ -2613,7 +2684,7 @@ function retargetRoom(name){
   const old=rooms; rooms=[];
   setTimeout(()=>{ old.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
   try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
-  session++; peers=new Map(); hadPeer=false;
+  session++; peers=new Map(); hadPeer=false; noVidSent=false;
   roomName=name; roomId=roomIdFromName(name);
   const s=session;
   setupCallScreen();
@@ -2750,7 +2821,7 @@ setInterval(function(){
 document.addEventListener("visibilitychange", ()=>{
   if(document.visibilityState==="visible"){
     clearTimeout(scrT);
-    if(scrPaused||scrAudio) screenOn();
+    if(scrPaused||scrAudio||scrIsOff) screenOn();
     if(getMySlot() && !lobby) joinLobby();
   } else if(inRoom && window.Android){
     clearTimeout(scrT); scrT=setTimeout(()=>{ if(document.hidden) screenOff(); }, 1500);
@@ -2760,14 +2831,14 @@ document.addEventListener("visibilitychange", ()=>{
 /* ───────────── Сигналы от системы Android ───────────── */
 function safeDecode(x){ try{ return decodeURIComponent(x); }catch(_){ return x; } }
 window.__nativeIncoming=function(o){ try{ o=o||{}; const from=+o.caller||0; if(!from) return;
-  onRing({ t:"call", from, to: o.all?0:(+o.to||getMySlot()), video:o.video!==false, name:o.name||slotName(from) }); }catch(_){} };
+  onRing({ t:"call", from, to: o.all?0:(+o.to||getMySlot()), video:o.video!==false, name:callerName(o.name, from) }); }catch(_){} };
 window.__pushRing=function(o){ try{ onRing(o||{}); }catch(_){} };
 window.__nativeAnswer=function(o){ try{
   o=o||{}; const v=(typeof o.video==="boolean")?o.video:true;
   if(incoming){ acceptCall(v); return; }
   if(inRoom) return;
   const from=+o.caller||0; const all=!!o.all; if(!from && !all) return;
-  incoming={ from, to: all?0:(+o.to||getMySlot()), video:v, all, name:o.name||slotName(from), room:guessRoom(from, all), cid:"", guessed:true };
+  incoming={ from, to: all?0:(+o.to||getMySlot()), video:v, all, name:callerName(o.name, from), room:guessRoom(from, all), cid:"", guessed:true };
   acceptCall(v);
 }catch(_){} };
 window.__nativeDecline=function(){ if(incoming) declineCall(); };
@@ -2846,7 +2917,7 @@ let bootExitMsg = "";
     const nm = __P.get("name");
     joinLobby();
     incoming = { from:c, to: all?0:(+(__P.get("to")||0)||getMySlot()), video: __P.get("video")!=="0", all,
-                 name: nm?safeDecode(nm):slotName(c), room: guessRoom(c, all), cid:"", guessed:true };
+                 name: callerName(nm?safeDecode(nm):"", c), room: guessRoom(c, all), cid:"", guessed:true };
     showIncoming(); ready();
     return;
   }
@@ -2855,7 +2926,7 @@ let bootExitMsg = "";
     const all = __P.get("all")==="1";
     const relay = __P.get("relay")==="1";
     const video = __P.get("video")!=="0" && !isCar();
-    const cn = __P.get("name"); callLabel = all ? "Общий созвон" : (cn ? safeDecode(cn) : "");
+    const cn = __P.get("name"); callLabel = all ? "Общий созвон" : callerName(cn ? safeDecode(cn) : "", c);
     const rp = __P.get("room"); const roomP = rp ? safeDecode(rp) : "";
     const room = isRoomName(roomP) ? roomP : guessRoom(c, all);
     if(!relay && !isRoomName(roomP) && (c || all)) acceptedGuess={ from:c, until:Date.now()+40000 };
