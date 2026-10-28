@@ -81,7 +81,7 @@
   #grid.cols2{grid-template-columns:1fr 1fr}
   #grid.haszoom{display:block}
   #grid.haszoom .tile.zoom{position:absolute;inset:0;border-radius:0;z-index:4}
-  .tile.reconnecting::before{content:"⟳ связь…";position:absolute;top:8px;left:8px;
+  .tile.reconnecting::before{content:"⟳ восстанавливаю связь…";position:absolute;top:8px;left:8px;
     z-index:3;background:rgba(227,93,93,.92);color:#fff;font-size:11px;padding:3px 9px;border-radius:8px}
   #grid.haszoom .tile:not(.zoom){position:absolute;right:10px;width:104px;aspect-ratio:3/4;
     z-index:5;border:2px solid rgba(255,255,255,.4);border-radius:12px;
@@ -435,6 +435,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
           <input class="field" id="pushUrl2" type="url" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false" style="margin-top:10px;font-family:var(--mono);font-size:12px" placeholder="Ещё один пуш-сервер (необязательно)">
           <button class="btn secondary sm" id="btnSavePush2">Сохранить пуш-сервер</button>
           <button class="btn secondary sm" id="btnIosPush" style="margin-top:8px">🔔 Фоновые звонки (iPhone / ноутбук)</button>
+          <button class="btn secondary sm" id="btnLog" style="margin-top:8px;flex-direction:column;gap:2px">📋 Журнал соединений<span id="logState" style="font-size:12px;font-weight:500;opacity:.75">отправить сейчас</span></button>
           <button class="btn wide sm" id="setClose" style="margin-top:10px">Закрыть</button>
         </div>
       </details>
@@ -561,6 +562,7 @@ const EXPRESS_TURN = [
 
 const APP_ID = "mk-zvonok-3";
 const PROTO = 2;   // v60: личные звонки — в отдельной комнате пары, общий созвон — в общей
+const APP_VER = 67;   // v67: номер версии страницы (пишется в журнал соединения)
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
   "wss://nos.lol",
@@ -612,7 +614,9 @@ function myPushTarget(){ if(myPlatform()==="android") return myFcmToken(); if(my
 function loadTokStore(){ try{ var o=JSON.parse(localStorage.getItem("zvk_tokens")||"{}"); return (o&&typeof o==="object")?o:{}; }catch(_){ return {}; } }
 function saveTokStore(o){ try{ localStorage.setItem("zvk_tokens", JSON.stringify(o)); }catch(_){} }
 function tokKey(v){ try{ return (v&&typeof v==="object")?(v.endpoint||JSON.stringify(v)):String(v); }catch(_){ return String(v); } }
-function cacheToken(slot, token, plat){
+/* v67: время записи адреса — по часам владельца (из его toks), чтобы сравнение с разошедшимися копиями было честным */
+function ownTs(d){ try{ const a = d.toks && d.toks[d.slot]; if (Array.isArray(a)){ const k = tokKey(d.tok); for (const x of a) if (x && x.token && tokKey(x.token) === k && +x.ts) return +x.ts; } }catch(_){} return Date.now(); }
+function cacheToken(slot, token, plat, ts){
   if(!slot || !token) return;
   var o=loadTokStore(); var key=String(slot);
   var nk=tokKey(token);
@@ -620,9 +624,49 @@ function cacheToken(slot, token, plat){
   for(var k in o){ if(k!==key && Array.isArray(o[k])){ o[k]=o[k].filter(function(x){ return x && x.token && tokKey(x.token)!==nk; }); if(!o[k].length) delete o[k]; } }
   var arr=Array.isArray(o[key])?o[key]:[];
   arr=arr.filter(function(x){ return x && x.token && tokKey(x.token)!==nk; });
-  arr.unshift({token:token, plat:plat||"android", ts:Date.now()});
+  arr.unshift({token:token, plat:plat||"android", ts:ts||Date.now()});
   if(arr.length>6) arr=arr.slice(0,6);
   o[key]=arr; saveTokStore(o);
+}
+/* v67: адреса пушей расходятся по «прихожей» от устройства к устройству (поле toks в pres):
+   так звонящий знает и устройство, с которым ни разу не был в сети одновременно
+   (второй телефон, планшет). Побеждает более свежая запись (ts); адрес, перешедший
+   на другое место, из прежнего убирается — как в cacheToken. */
+function tokGossip(){
+  const o = loadTokStore(), my = getMySlot(), me = myPushTarget();
+  if (my && me){
+    const k = String(my), nk = tokKey(me);
+    for (const j in o){ if (Array.isArray(o[j])){ o[j] = o[j].filter(function(x){ return x && x.token && tokKey(x.token) !== nk; }); if (!o[j].length) delete o[j]; } }
+    const arr = Array.isArray(o[k]) ? o[k] : [];
+    arr.unshift({ token: me, plat: myPlatform(), ts: Date.now() });
+    o[k] = arr.slice(0, 6);
+  }
+  return o;
+}
+function mergeTokStore(r){
+  if (!r || typeof r !== "object") return;
+  const o = loadTokStore(), now = Date.now(); let ch = false;
+  const where = {};   // адрес → { slot, ts }
+  for (const k in o){ if (Array.isArray(o[k])) o[k].forEach(function(x){ if (x && x.token) where[tokKey(x.token)] = { slot: k, ts: +x.ts || 0 }; }); }
+  for (const k in r){
+    const sl = +k; if (!(sl >= 1 && sl <= SLOTS) || !Array.isArray(r[k])) continue;
+    r[k].slice(0, 6).forEach(function(x){
+      if (!x || !x.token || (x.plat !== "android" && x.plat !== "ios")) return;
+      const tk = x.token;
+      if (typeof tk === "string" ? (tk.length > 600) : !(tk && typeof tk === "object" && typeof tk.endpoint === "string")) return;
+      const ts = +x.ts || 0; if (ts > now + 86400000) return;   // ts ставит сам владелец адреса (его часы)
+      const key = tokKey(tk);
+      const cur = where[key];
+      if (cur && cur.ts >= ts) return;
+      if (cur && Array.isArray(o[cur.slot])){ o[cur.slot] = o[cur.slot].filter(function(y){ return y && y.token && tokKey(y.token) !== key; }); if (!o[cur.slot].length) delete o[cur.slot]; }
+      const arr = Array.isArray(o[String(sl)]) ? o[String(sl)] : [];
+      arr.push({ token: tk, plat: x.plat, ts: ts });
+      arr.sort(function(a, b){ return (b.ts || 0) - (a.ts || 0); });
+      o[String(sl)] = arr.slice(0, 6);
+      where[key] = { slot: String(sl), ts: ts }; ch = true;
+    });
+  }
+  if (ch) saveTokStore(o);
 }
 function _collect(slot, plat, all){
   var o=loadTokStore(), out=[];
@@ -649,18 +693,18 @@ function pushPost(url, body, ms){
   });
 }
 const pushJobs = {};   // кому звоним → { urls: куда ушёл вызов, cancelled }
-async function pushSend(to, video, cancel, cid){
+async function pushSend(to, video, cancel, cid, ans, room){
   const urls = pushUrls(); if(!urls.length) return;
   const t = targetsFor(to); if(!t.tokens.length && !t.subs.length) return;
   const body = { action:"call", from:getMySlot(), to:to, secret:SECRET, tokens:t.tokens, subs:t.subs };
   if (cancel){
-    body.cancel = true; if (cid) body.cid = cid;
+    body.cancel = true; if (cid) body.cid = cid; if (ans) body.ans = 1;
     const job = pushJobs[to]; delete pushJobs[to];
     if (job) job.cancelled = true;
     ((job && job.urls.length) ? job.urls : urls).forEach(function(u){ pushPost(u, body, 10000); });
     return;
   }
-  body.video = video ? 1 : 0; body.name = slotName(getMySlot()); if (cid) body.cid = cid;
+  body.video = video ? 1 : 0; body.name = slotName(getMySlot()); if (cid) body.cid = cid; if (isRoomName(room)) body.room = room;
   const job = { urls: [], cancelled: false }; pushJobs[to] = job;
   let skipMain = false;
   for (const u of urls){
@@ -668,15 +712,129 @@ async function pushSend(to, video, cancel, cid){
     const isMain = PUSH_MAIN.indexOf(u) >= 0;
     if (isMain && skipMain) continue;
     job.urls.push(u);
+    const t0 = Date.now();
     const ok = await Promise.race([ pushPost(u, body, 15000), new Promise(function(r){ setTimeout(function(){ r("slow"); }, 3000); }) ]);
+    zlog("push", { to: to, u: urls.indexOf(u), res: ok === true ? "ok" : (ok === "slow" ? "slow" : "fail"), ms: Date.now() - t0, cid: cid });
     if (ok === true) return;            // доставлено
     /* ошибка или молчит дольше 3 с — сразу пробуем следующий (медленный пусть досылает:
        повтор того же вызова устройство отбросит). Свой сервер молчит — второй его адрес не ждём. */
     if (ok === "slow" && isMain) skipMain = true;
   }
 }
-function pushCall(to, video, cid){ pushSend(to, video, false, cid); }
-function pushCancel(to, cid){ pushSend(to, false, true, cid); }
+function pushCall(to, video, cid, room){ pushSend(to, video, false, cid, false, room); }
+function pushCancel(to, cid, ans){ pushSend(to, false, true, cid, ans); }
+
+/* ── v67: журнал соединения ──
+   Важные события и показатели связи копятся в очереди (localStorage) и раз в минуту, а также
+   после звонка уходят на свой сервер (PUSH_MAIN, action "log") — там всё пишется в один файл.
+   Сервер недоступен — пачка уходит устройству Миши (место 1) через «прихожую»; оно хранит её
+   у себя (архив для сохранения в файл) и само дошлёт на сервер. */
+const LOG_MAX = 2000;          // записей в очереди на отправку (старые вытесняются)
+const LOG_KEEP = 3000;         // архив на устройстве Миши
+const LOG_BATCH = 300;
+function devId(){ try{ let d = localStorage.getItem("zvk_dev"); if (!d){ d = Math.random().toString(36).slice(2, 8); localStorage.setItem("zvk_dev", d); } return d; }catch(_){ return "nodev"; } }
+function lsArr(k){ try{ const v = JSON.parse(localStorage.getItem(k) || "null"); return Array.isArray(v) ? v : []; }catch(_){ return []; } }
+let logQ = lsArr("zvk_logq");
+let logSaveT = null, logBusy = false, logLastUp = 0, logErrN = 0, archPend = [], logNextAt = 0;
+function logSaveNow(){
+  clearTimeout(logSaveT); logSaveT = null;
+  try{ localStorage.setItem("zvk_logq", JSON.stringify(logQ)); }
+  catch(_){ logQ = logQ.slice(-500); try{ localStorage.setItem("zvk_logq", JSON.stringify(logQ)); }catch(__){} }
+  if (archPend.length){
+    let a = lsArr("zvk_logarch").concat(archPend); archPend = [];
+    if (a.length > LOG_KEEP) a = a.slice(a.length - LOG_KEEP);
+    try{ localStorage.setItem("zvk_logarch", JSON.stringify(a)); }
+    catch(_){ try{ localStorage.setItem("zvk_logarch", JSON.stringify(a.slice(-Math.floor(LOG_KEEP / 3)))); }catch(__){} }
+  }
+}
+function logSave(){ if (!logSaveT) logSaveT = setTimeout(logSaveNow, 1500); }
+function logArch(items){ archPend = archPend.concat(items); logSave(); }
+function zlog(ev, o){
+  try{
+    const e = { t: Date.now(), dv: devId(), s: getMySlot(), v: APP_VER, ev: ev };
+    if (o) for (const k in o){ const x = o[k]; if (x !== undefined && x !== null && x !== "" && !(typeof x === "number" && isNaN(x))) e[k] = x; }
+    logQ.push(e); if (logQ.length > LOG_MAX) logQ.splice(0, logQ.length - LOG_MAX);
+    if (getMySlot() === 1) logArch([e]);
+    logSave();
+  }catch(_){}
+}
+/* пачки с других устройств (пришли Мише, когда сервер был недоступен) */
+function logIngest(items){
+  if (!Array.isArray(items)) return;
+  const ok = items.filter(function(x){ return x && typeof x === "object" && typeof x.ev === "string" && typeof x.t === "number"; }).slice(0, 1000);
+  if (!ok.length) return;
+  logQ = logQ.concat(ok); if (logQ.length > LOG_MAX) logQ.splice(0, logQ.length - LOG_MAX);
+  logArch(ok); logSave();
+}
+/* устройство Миши в «прихожей» с живым соединением (иначе пачка ушла бы в пустоту) */
+function mishaPeer(){
+  if (!lobby || getMySlot() === 1 || navigator.onLine === false) return null;
+  let pcs = null; try{ pcs = lobby.room.getPeers ? lobby.room.getPeers() : null; }catch(_){}
+  for (const [pid, sl] of lobby.slotByPeer){
+    if (+sl !== 1) continue;
+    const pc = pcs && pcs[pid];
+    if (pc && (pc.connectionState === "connected" || pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed")) return pid;
+  }
+  return null;
+}
+const logPend = {};   // пачки, отданные Мише и ещё не подтверждённые: bid → записи
+function logToMisha(){
+  const pid = mishaPeer(); if (!pid || !lobby.sendLog || !logQ.length) return 0;
+  const inPend = new Set(); for (const k in logPend) logPend[k].forEach(function(x){ inPend.add(x); });
+  const batch = logQ.filter(function(x){ return !inPend.has(x); }).slice(0, LOG_BATCH);
+  if (!batch.length) return 0;
+  const bid = Math.random().toString(36).slice(2, 10);
+  logPend[bid] = batch; setTimeout(function(){ delete logPend[bid]; }, 30000);   // не подтвердил — записи остаются в очереди
+  lobby.sendLog({ bid: bid, items: batch }, pid);
+  return batch.length;
+}
+/* Миша подтвердил пачку — убираем её из очереди */
+function logAcked(bid){
+  const b = logPend[bid]; if (!b) return; delete logPend[bid];
+  const sent = new Set(b); logQ = logQ.filter(function(x){ return !sent.has(x); }); logSave();
+}
+/* отправить очередь: force — сразу (кнопка, конец звонка); иначе не чаще раза в 50 с.
+   cb(результат): "server" | "misha" | "kept" | "empty" */
+function logUpload(force, cb){
+  const done = function(r, n){ try{ if (cb) cb(r, n); }catch(_){} };
+  if (!logQ.length){ done("empty"); return; }
+  if (logBusy){ done("busy"); return; }
+  if (!force && Date.now() - logLastUp < 50000){ done("kept"); return; }
+  if (!force && logErrN && Date.now() < logNextAt){ const m = logToMisha(); done(m ? "misha" : "kept", m); return; }
+  const urls = PUSH_MAIN.filter(Boolean); if (!urls.length){ done("kept"); return; }
+  const batch = logQ.slice(0, LOG_BATCH);
+  logBusy = true; logLastUp = Date.now();
+  (async function(){
+    let ok = false;
+    for (const u of urls){ if (await pushPost(u, { action: "log", secret: SECRET, items: batch }, 12000)){ ok = true; break; } }
+    logBusy = false;
+    if (ok){
+      logErrN = 0; logNextAt = 0;
+      const sent = new Set(batch); logQ = logQ.filter(function(x){ return !sent.has(x); }); logSave();
+      if (logQ.length) setTimeout(function(){ logUpload(true); }, 1500);
+      done("server", batch.length);
+    } else {
+      logErrN++; logNextAt = Date.now() + Math.min(60000 * Math.pow(2, logErrN - 1), 1800000);
+      const m = logToMisha();
+      if (m) done("misha", m); else done("kept");
+    }
+  })();
+}
+setInterval(function(){ logUpload(false); }, 60000);
+/* страница закрывается посреди разговора — «до свидания» раньше выхода, который шлёт библиотека:
+   иначе собеседник принял бы его за обрыв связи и ждал бы восстановления */
+function byeOnUnload(){
+  try{ if (inRoom && !window.__byeSent){ window.__byeSent = true; sendByeAll(); if (lobby && roomName) lobby.sendRing({ t:"hangup", from:getMySlot(), room:roomName }); } }catch(_){}
+  logSaveNow();
+}
+window.addEventListener("beforeunload", byeOnUnload);
+window.addEventListener("pagehide", byeOnUnload);   // Safari (iPhone) не всегда шлёт beforeunload
+(function(){
+  let n = 0;
+  window.addEventListener("error", function(e){ if (n++ < 20) zlog("err", { m: String((e && e.message) || "").slice(0, 200), l: e && e.lineno }); });
+  window.addEventListener("online", function(){ zlog("online"); });
+  window.addEventListener("offline", function(){ zlog("offline"); });
+})();
 
 /* ── iPhone: подписка на Web Push (только PWA с домашнего экрана, iOS 16.4+) ── */
 function isIOSStandalone(){ try{ return isIOS() && (navigator.standalone===true || (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches)); }catch(_){ return false; } }
@@ -720,8 +878,10 @@ function protoOf(slot){ return +(loadProto()[slot]||0); }
 function isRoomName(n){ return typeof n==="string" && n.length<80 && (n===GENERAL_ROOM || /^p-\d+-\d+-/.test(n)) && n.slice(-SECRET.length)===SECRET; }
 /* куда звать: уже в разговоре — в него же; общий — в общую; личный — в комнату пары
    (если контакт точно на новой версии), иначе по-старому в общую */
-function roomForCall(to){ if(inRoom && roomName) return roomName; if(to===0) return GENERAL_ROOM; return protoOf(to)===2 ? pairRoom(getMySlot(),to) : GENERAL_ROOM; }
-function guessRoom(from, all){ if(all || !from) return GENERAL_ROOM; return protoOf(from)===2 ? pairRoom(from,getMySlot()) : GENERAL_ROOM; }
+function roomForCall(to){ if(inRoom && roomName) return roomName; if(to===0) return GENERAL_ROOM; return protoOf(to)===1 ? GENERAL_ROOM : pairRoom(getMySlot(),to); }
+/* v67: «наугад» — комната пары; общая — только для общего созвона и для звонящего со старой версией (v:1).
+   Раньше незнакомая версия уводила в общую комнату — там встречались посторонние («случайный общий созвон»). */
+function guessRoom(from, all){ if(all || !from) return GENERAL_ROOM; return protoOf(from)===1 ? GENERAL_ROOM : pairRoom(from,getMySlot()); }
 function newCid(){ return Math.random().toString(36).slice(2,10)+Date.now().toString(36); }
 /* Состав группы — одинаковый у всех, по номерам 1…7 */
 const ROSTER = ["Миша","Сергей","Ольга","Оля","Соня","Катя","Лера","Лена","Наталья"];
@@ -779,7 +939,6 @@ let localStream = null;
 let rooms = [];                // [{tag, room, sendMeta, sendMode}]
 let peers = new Map();         // peerId -> {rec, name, tile, gotStream}
 let inRoom = false, session = 0;
-let FIXED_ROOM_REJOINED = false;   // одноразовая авто-переподключка, чтобы не зациклиться
 let timerInt = null, timerStart = 0;
 
 /* ───────────── Утилиты ───────────── */
@@ -893,6 +1052,7 @@ async function enterRoom(name, video){
   setHomeStatus("");
   setupCallScreen();
   setWaitStatus("Подключаюсь к каналам…");
+  zlog("join", { pair: /^p-/.test(name) ? 1 : 0, video: video ? 1 : 0, relay: forceRelay() ? 1 : 0, net: netClass(), inc: callIn ? 1 : 0 });
   joinAll(s);
   startNetWatch(s);
   reportVideo();
@@ -933,7 +1093,13 @@ function joinAll(s){
       rec.sendNeed = (target)=>{ try{ const r = needAct.send({}, target?{targets:[target]}:undefined); r && r.catch && r.catch(()=>{}); }catch(_){} };
       metaAct.onMessage = (d, ctx) => {
         if (s !== session || !d || !ctx) return;
-        if (d.name) setMemberName(ctx.peerId, String(d.name).slice(0,20));
+        if (d.name){
+          const nm = String(d.name).slice(0,20);
+          setMemberName(ctx.peerId, nm);
+          /* v67: тот же человек вернулся с новым соединением (страница у него перезапустилась) —
+             его «пропавшая» плитка больше не нужна */
+          for (const [qid, q] of peers) if (qid !== ctx.peerId && q.lostAt && q.name === nm){ zlog("drop", { pid: shortId(qid), why: "replaced" }); dropPeer(qid, "replaced"); }
+        }
         const p = peers.get(ctx.peerId);
         if (p && typeof d.vid === "boolean") p.hasVideo = d.vid;
         if (p && typeof d.novid === "boolean") pauseVideoTo(ctx.peerId, d.novid);
@@ -959,11 +1125,15 @@ function wireRoom(rec, s){
   rec.room.onPeerJoin = id => {
     if (s !== session || !inRoom) return;
     const ex = peers.get(id);
-    if (ex && ex.leaveT){ clearTimeout(ex.leaveT); ex.leaveT = null; }   // вернулся — отменяем удаление
+    /* v67: пропавший участник вернулся (или библиотека построила новое соединение) —
+       заново шлём ему свой поток и данные; плитка и счётчики остаются */
+    if (ex){ if (ex.lostAt || ex.leaving || (ex.pcRef && peerPc(ex, id) !== ex.pcRef)) peerBack(id, rec); return; }
     trackPeer(id, rec);
   };
   rec.room.onPeerStream = (stream, id) => {
     if (s !== session || !inRoom) return;
+    const ex = peers.get(id);
+    if (ex && (ex.lostAt || ex.leaving)) peerBack(id, rec);
     let p = peers.get(id) || trackPeer(id, rec);
     if (!p) return;
     p.gotStream = true;
@@ -976,6 +1146,15 @@ function wireRoom(rec, s){
     if (p && p.rec === rec) onTrackedLeave(id);
   };
 }
+/* v67: сроки восстановления связи */
+const RESTART_MS = 2500;      // связь «провисла» — через 2,5 с ICE-restart (при коротком сбое хватает)
+const KILL_MS = 6000;         // не поднялась за 6 с — закрываем соединение: библиотека заново найдёт участника
+const LOST_ALONE_MS = 60000;  // вдвоём: сколько ждём возвращения пропавшего собеседника
+const LOST_GROUP_MS = 20000;  // в группе (с остальными связь есть): потом плитка пропадает, вернётся — появится снова
+let netChangedAt = 0;         // когда сменилась сеть (Wi-Fi ⇄ сотовая): старый путь не вернётся
+function shortId(id){ return String(id || "").slice(0, 6); }
+function peerPc(p, id){ try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; return (pcs && pcs[id]) || null; }catch(_){ return null; } }
+function livePeerCount(){ let n = 0; for (const p of peers.values()) if (!p.lostAt && !p.leaving) n++; return n; }
 function trackPeer(id, rec){
   let p = peers.get(id);
   if (p) return p;
@@ -984,6 +1163,21 @@ function trackPeer(id, rec){
         hasVideo: true, nudges: 0, retryT: [] };
   peers.set(id, p);
   hadPeer = true;
+  zlog("peer", { pid: shortId(id), n: peers.size });
+  /* v67: личный вызов приняли (первый собеседник в комнате пары) — остальные устройства
+     этого человека перестают звонить сразу, а не через 40 с */
+  const psl = lobby ? +(lobby.slotByPeer.get(id) || 0) : 0;   // id в «прихожей» и в разговоре один
+  if (outgoing && outgoing.to && !outgoing.ansSent && outgoing.room === roomName && /^p-/.test(roomName) && (psl ? psl === outgoing.to : (outgoing.own && peers.size === 1))){ outgoing.ansSent = true; ringAnswered(outgoing); }
+  peerSetup(p, id);
+  updateCount();
+  pokeUI();
+  return p;
+}
+/* всё, что относится к одному соединению с участником: знакомство, свой поток, сторожа.
+   v67: вызывается и при первом входе, и когда связь восстановилась после обрыва */
+function peerSetup(p, id){
+  const rec = p.rec;
+  p.joinedAt = Date.now();
   rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) && !scrPaused, rot: myRot() }, id);
   const autoA = audioOnly && (audioScr || audioCar) && !audioTurn;   // «только звук» включился сам — это для двоих
   if (audioOnly && !(autoA && peers.size > 1)) rec.sendMode({ audioOnly: true, reason: (audioCar?"car":"")+(audioTurn?"turn":"")+(audioScr?"scr":"") }, id);
@@ -999,14 +1193,15 @@ function trackPeer(id, rec){
     sendStreamTo(p, id);
   } else {
     p.retryT.push(setTimeout(()=>{           // страховка, если первый молчит
-      if (sess === session && peers.get(id) === p && !p.sentStream) sendStreamTo(p, id);
+      if (sess === session && peers.get(id) === p && !p.sentStream && !p.lostAt) sendStreamTo(p, id);
     }, 3500));
   }
+  watchConnection(p, id);
   /* контроль РЕАЛЬНЫХ КАДРОВ: если собеседник с камерой, а пиксели не идут —
      просим его переслать поток заново и пересылаем свой */
   for (const delay of [6000, 12000, 20000]){
     p.retryT.push(setTimeout(()=>{
-      if (sess !== session || peers.get(id) !== p || audioOnly || noVidSent || p.nudges >= 4) return;
+      if (sess !== session || peers.get(id) !== p || p.lostAt || audioOnly || noVidSent || p.nudges >= 4) return;
       const v = p.tile && p.tile.querySelector("video");
       const framesOk = v && v.videoWidth > 0;
       if (!p.gotStream || (p.hasVideo && !framesOk)){
@@ -1020,83 +1215,47 @@ function trackPeer(id, rec){
   /* СТОРОЖ СОЕДИНЕНИЯ (важно для Huawei и капризных сетей):
      участник в комнате виден, но связь не установилась — принудительно лечим. */
   p.retryT.push(setTimeout(()=>{
-    if (sess !== session || peers.get(id) !== p) return;
-    let pc = null;
-    try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; pc = pcs && pcs[id]; }catch(_){}
+    if (sess !== session || peers.get(id) !== p || p.lostAt) return;
+    const pc = peerPc(p, id);
     const st = pc && pc.iceConnectionState;
     if (st !== "connected" && st !== "completed"){
+      zlog("restart", { pid: shortId(id), kind: "ice18", st: st || "none" });
       try{ pc && pc.restartIce && pc.restartIce(); }catch(_){}
       p.sentStream = false; sendStreamTo(p, id);
       p.rec.sendNeed(id);
     }
   }, 18000));
+  /* совсем не поднялось за 28 с — строим соединение заново (раньше — перезагрузка страницы) */
   p.retryT.push(setTimeout(()=>{
-    if (sess !== session || peers.get(id) !== p) return;
-    let pc = null;
-    try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; pc = pcs && pcs[id]; }catch(_){}
+    if (sess !== session || peers.get(id) !== p || p.lostAt) return;
+    const pc = peerPc(p, id);
     const st = pc && pc.iceConnectionState;
     const v = p.tile && p.tile.querySelector("video");
     const haveMedia = (st === "connected" || st === "completed") || (v && v.videoWidth > 0) || p.gotStream;
-    if (!haveMedia && !FIXED_ROOM_REJOINED && !anyHealthyPeer(id)){
-      /* совсем не поднялось за 28 с — тихо перезапускаем подключение к комнате */
-      FIXED_ROOM_REJOINED = true;
-      silentRejoin();
-    }
+    if (!haveMedia && pc) peerKill(p, id, pc, "never");
   }, 28000));
-  updateCount();
-  pokeUI();
-  return p;
 }
 function sendStreamTo(p, id){
-  if (p.sentStream || !localStream) return;
+  if (p.sentStream || !localStream || p.lostAt) return;
   p.sentStream = true;
   try{ p.rec.room.addStream(localStream, { target: id }); }catch(_){}
   if (p.novid) pauseVideoTo(id, true);   // поток переслали — просьба «без видео» в силе
-  watchConnection(p, id);
 }
-/* следим за состоянием канала к конкретному участнику и чиним обрывы */
+/* следим за состоянием канала к конкретному участнику и чиним обрывы.
+   v67: соединение может смениться (библиотека строит новое) — подписываемся на каждое */
 function watchConnection(p, id){
+  clearTimeout(p.watchT);
   const sess = session;
   const tick = ()=>{
-    if (sess !== session || peers.get(id) !== p) return;
-    let pc = null;
-    try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; pc = pcs && pcs[id]; }catch(_){}
-    if (pc && !p.pcHooked){
-      p.pcHooked = true;
-      const onState = ()=>{
-        const st = pc.iceConnectionState;
-        if (st === "connected" || st === "completed"){
-          p.badSince = 0;
-          if (p.tile) p.tile.classList.remove("reconnecting");
-          resumeXfersWith(id);   // связь восстановилась — продолжаем недокачанные файлы
-        } else if (st === "disconnected" || st === "failed"){
-          if (p.leaving) return;                  // ушёл сам — не чиним
-          if (p.tile) p.tile.classList.add("reconnecting");
-          if (!p.badSince) p.badSince = Date.now();
-          markXfersWaiting(id);
-          /* быстрый ICE-restart — переустановить путь, не разрывая звонок */
-          if (!p.restartT){
-            const grace = (st === "failed") ? 2500 : 7000;   // не дёргать при коротких «провисаниях»
-            p.restartT = setTimeout(()=>{
-              p.restartT = null;
-              if (sess !== session || peers.get(id) !== p) return;
-              if (p.leaving) return;
-              if (pc.iceConnectionState === "disconnected" || pc.iceConnectionState === "failed"){
-                /* в общем разговоре участник пропал надолго (закрыл приложение, потерял сеть) —
-                   убираем его плитку, остальные продолжают говорить */
-                if (peers.size > 1 && p.badSince && Date.now() - p.badSince > 30000){ dropPeer(id); return; }
-                try{ pc.restartIce && pc.restartIce(); }catch(_){}
-                p.iceFails=(p.iceFails||0)+1;
-                /* через реле (с перезагрузкой страницы) — только если связи нет ни с кем:
-                   иначе уход одного участника обрывал разговор у всех */
-                if (p.iceFails>=2 && !anyHealthyPeer(id)) triggerAutoRelay();
-                resendStreamTo(id);
-                if (p.iceFails>=2 && peers.size > 1){ p.restartT = null; setTimeout(onState, 8000); }
-              }
-            }, grace);
-          }
-        }
-      };
+    if (sess !== session || peers.get(id) !== p || p.lostAt) return;
+    const pc = peerPc(p, id);
+    if (!pc && p.pcRef){ p.goneN = (p.goneN || 0) + 1; if (p.goneN >= 4){ p.goneN = 0; peerLost(id, "gone"); return; } } else p.goneN = 0;
+    /* v67: предложение потока 4–6 с без ответа — «столкновение» (обе стороны ждут друг друга): строим заново */
+    if (pc && pc.signalingState === "have-local-offer"){ p.offerN = (p.offerN || 0) + 1; if (p.offerN >= 3){ p.offerN = 0; peerKill(p, id, pc, "offer"); return; } } else p.offerN = 0;
+    if (pc && p.pcRef !== pc){
+      p.pcRef = pc; p.iceKey = "";
+      if (p.relay) pcToRelay(p, id, pc);
+      const onState = ()=> pcState(p, id, pc, sess);
       pc.addEventListener("iceconnectionstatechange", onState);
       pc.addEventListener("connectionstatechange", onState);
       onState();
@@ -1121,6 +1280,7 @@ function watchConnection(p, id){
         } else if (p.freezeN >= 4){
           /* не помогло — просим собеседника переслать видео заново */
           p.freezeN = 0;
+          zlog("freeze", { pid: shortId(id) });
           p.rec.sendNeed(id);
           resendStreamTo(id);
           try{ pc.restartIce && pc.restartIce(); }catch(_){}
@@ -1134,84 +1294,210 @@ function watchConnection(p, id){
   };
   tick();
 }
+function pcState(p, id, pc, sess){
+  if (sess !== session || peers.get(id) !== p || p.pcRef !== pc || p.lostAt) return;
+  const st = pc.iceConnectionState, cs = pc.connectionState;
+  const key = st + "/" + cs;
+  if (p.iceKey !== key){ p.iceKey = key; zlog("ice", { pid: shortId(id), st: st, cs: cs, ms: Date.now() - (p.joinedAt || Date.now()) }); }
+  if (st === "connected" || st === "completed"){
+    if (p.badSince) zlog("ok", { pid: shortId(id), ms: Date.now() - p.badSince });
+    p.badSince = 0;
+    clearTimeout(p.restartT); p.restartT = null; clearTimeout(p.killT); p.killT = null;
+    if (p.tile) p.tile.classList.remove("reconnecting");
+    resumeXfersWith(id);   // связь восстановилась — продолжаем недокачанные файлы
+  } else if (st === "disconnected" || st === "failed" || cs === "failed"){
+    if (p.leaving) return;                  // ушёл сам — не чиним
+    if (p.tile) p.tile.classList.add("reconnecting");
+    if (!p.badSince) p.badSince = Date.now();
+    markXfersWaiting(id);
+    /* быстрый ICE-restart — переустановить путь, не разрывая звонок */
+    if (!p.restartT){
+      p.restartT = setTimeout(()=>{
+        p.restartT = null;
+        if (sess !== session || peers.get(id) !== p || p.pcRef !== pc || p.lostAt) return;
+        const s2 = pc.iceConnectionState;
+        if (s2 === "disconnected" || s2 === "failed"){
+          zlog("restart", { pid: shortId(id), kind: "ice", st: s2 });
+          try{ pc.restartIce && pc.restartIce(); }catch(_){}
+        }
+      }, RESTART_MS);
+    }
+    /* не поднялось — новое соединение (через реле Nostr по лучшему пути, в т. ч. по новой сети) */
+    if (!p.killT){
+      const ms = (Date.now() - netChangedAt < 20000) ? 1500 : KILL_MS;
+      p.killT = setTimeout(()=>{
+        p.killT = null;
+        if (sess !== session || peers.get(id) !== p || p.pcRef !== pc || p.lostAt) return;
+        const s2 = pc.iceConnectionState;
+        if (s2 !== "connected" && s2 !== "completed") peerKill(p, id, pc, "stuck");
+      }, ms);
+    }
+  }
+}
+/* v67: прямой путь к собеседнику не держится — соединение с ним дальше только через свой TURN
+   по TCP (UDP режут и операторы, и часть Wi-Fi). Свой сервер недоступен — остаёмся как есть. */
+function relayTurns(){
+  const isTcp = x => /transport=tcp/i.test(Array.isArray(x.urls) ? x.urls[0] : x.urls);
+  const tcp = SELF_TURN.concat(EXPRESS_TURN).filter(isTcp);
+  return customTurn().concat(tcp.length ? tcp : SELF_TURN);
+}
+let relayBusy = false;
+async function relayFallback(why, id){
+  const p = peers.get(id);
+  if (!p || p.relay || relayBusy || forceRelay() || !inRoom) return;
+  const ts = relayTurns(); if (!ts.length) return;
+  relayBusy = true;
+  const sess = session;
+  let alive = false;
+  try{ alive = await probeTurn(ts, 4000); }catch(_){}
+  relayBusy = false;
+  if (sess !== session || peers.get(id) !== p || p.relay) return;
+  if (!alive){ zlog("relay-dead", { why: why, pid: shortId(id) }); return; }
+  p.relay = true;
+  zlog("relay", { why: why, pid: shortId(id) });
+  toast("Прямая связь нестабильна — этот звонок через свой сервер", 4000);
+  const pc = !p.lostAt && peerPc(p, id);
+  if (pc) pcToRelay(p, id, pc);           // пропавшего переведём, когда соединение появится снова
+}
+/* на ходу: новые настройки + ICE-restart (договариваются по самому соединению) */
+function pcToRelay(p, id, pc){
+  try{
+    if (pc.getConfiguration().iceTransportPolicy === "relay") return;
+    pc.setConfiguration(Object.assign(pc.getConfiguration(), { iceServers: relayTurns(), iceTransportPolicy: "relay" }));
+    pc.restartIce();
+    zlog("restart", { pid: shortId(id), kind: "relay" });
+  }catch(e){ zlog("relay-err", { pid: shortId(id), m: String((e && e.message) || e).slice(0, 120) }); }
+}
+/* обратно к обычным настройкам («прихожей») — тоже на ходу */
+function pcFromRelay(pc){
+  try{
+    if (pc.connectionState === "closed" || pc.getConfiguration().iceTransportPolicy !== "relay") return;
+    const n = (lobby && lobby.rtc) || iceConfig();
+    pc.setConfiguration(Object.assign(pc.getConfiguration(), { iceServers: n.iceServers, iceTransportPolicy: "all" }));
+    pc.restartIce();
+  }catch(_){}
+}
+/* v67: соединение само не восстанавливается — закрываем его. Библиотека убирает участника
+   (onPeerLeave → «восстанавливаю связь»), через реле Nostr снова находит его и строит новое
+   соединение. Страница не перезагружается, разговор не прерывается. */
+function peerKill(p, id, pc, why){
+  zlog("restart", { pid: shortId(id), kind: "close", why: why || "" });
+  try{ pc.close(); }catch(_){}
+  try{ pc.dispatchEvent(new Event("connectionstatechange")); }catch(_){}   // close() событий не шлёт — сообщаем библиотеке сами
+}
+/* сменилась сеть: «провисшие» соединения рвём сразу — старый путь не вернётся */
+function netKick(){
+  for (const [id, p] of peers){
+    if (p.lostAt || !p.badSince || !p.pcRef) continue;
+    const pc = p.pcRef; clearTimeout(p.killT);
+    p.killT = setTimeout(()=>{
+      p.killT = null;
+      if (peers.get(id) !== p || p.pcRef !== pc || p.lostAt) return;
+      const s2 = pc.iceConnectionState;
+      if (s2 !== "connected" && s2 !== "completed") peerKill(p, id, pc, "net");
+    }, 1500);
+  }
+}
 function resendStreamTo(id){
   const p = peers.get(id);
-  if (!p || !localStream) return;
+  if (!p || !localStream || p.lostAt) return;
   try{ p.rec.room.removeStream(localStream, { target: id }); }catch(_){}
   setTimeout(()=>{
-    if (peers.get(id) !== p || !localStream) return;
+    if (peers.get(id) !== p || !localStream || p.lostAt) return;
     try{ p.rec.room.addStream(localStream, { target: id }); p.sentStream = true; }catch(_){}
     if (p.novid) pauseVideoTo(id, true);
   }, 250);
 }
+/* таймеры и признаки одного соединения (плитка, имя, счётчики — остаются) */
+function peerClearConn(p){
+  (p.retryT || []).forEach(clearTimeout); p.retryT = [];
+  clearTimeout(p.watchT); clearTimeout(p.restartT); clearTimeout(p.killT); clearTimeout(p.novidT);
+  if (p.leaveT){ clearTimeout(p.leaveT); p.leaveT = null; }
+  p.restartT = null; p.killT = null;
+  p.sentStream = false; p.gotStream = false; p.pcRef = null; p.badSince = 0;
+  p.nudges = 0; p.freezeN = 0; p.lastVT = null; p.goneN = 0; p.offerN = 0;
+}
+/* библиотека убрала участника. Попрощался («bye») — уходит; иначе это обрыв связи */
 function onTrackedLeave(id){
   const p = peers.get(id);
   if (!p) return;
-  p.leaving = true;
-  /* участник пропал на этом канале — возможно, жив на другом */
-  for (const rec of rooms){
-    if (rec === p.rec) continue;
-    const pcs = rec.room.getPeers ? rec.room.getPeers() : null;
-    if (pcs && pcs[id]){
-      p.rec = rec; p.gotStream = false; p.sentStream = false; p.nudges = 0; p.pcHooked = false;
-      sendStreamTo(p, id);
-      rec.sendMeta({ name: myName, vid: !!(localStream && localStream.getVideoTracks().length) && !scrPaused, rot: myRot() }, id);
-      return;
+  if (p.leaving){ dropPeer(id, "bye"); return; }
+  peerLost(id, "leave");
+}
+/* v67: связь с участником оборвалась. Разговор не закрываем: плитка с пометкой
+   «восстанавливаю связь», ждём, пока библиотека снова найдёт его (вдвоём 60 с, в группе 20 с) */
+function peerLost(id, why){
+  const p = peers.get(id); if (!p) return;
+  peerClearConn(p);
+  markXfersWaiting(id);
+  if (!p.lostAt){
+    p.lostAt = Date.now();
+    if (!p.relay && p.pathKey && !/^relay/.test(p.pathKey)){
+      p.drops = (p.drops || []).filter(t => p.lostAt - t < 300000); p.drops.push(p.lostAt);
+      if (p.drops.length >= 2) relayFallback("drops", id);
     }
+    zlog("lost", { pid: shortId(id), why: why, n: peers.size });
+    if (p.tile) p.tile.classList.add("reconnecting");
+    if (livePeerCount() === 0) toast("Связь прервалась — восстанавливаю…", 4000);
   }
-  /* ложные «уходы» от реле — частая причина обрывов. Не выбрасываем сразу:
-     даём 6 секунд; если соединение ещё живо (идут кадры/connected) — оставляем */
-  if (!p.leaveT){
-    p.leaveT = setTimeout(()=>{
-      p.leaveT = null;
-      const cur = peers.get(id);
-      if (!cur) return;
-      let alive = false;
-      try{
-        const pcs = cur.rec.room.getPeers ? cur.rec.room.getPeers() : null;
-        const pc = pcs && pcs[id];
-        if (pc && (pc.iceConnectionState === "connected" || pc.iceConnectionState === "completed")) alive = true;
-      }catch(_){}
-      const v = cur.tile && cur.tile.querySelector("video");
-      if (v && v.videoWidth > 0) alive = true;
-      if (!alive) dropPeer(id);
-    }, 6000);
-  }
+  clearTimeout(p.lostT);
+  const max = livePeerCount() > 0 ? LOST_GROUP_MS : LOST_ALONE_MS;
+  p.lostT = setTimeout(()=>{
+    if (peers.get(id) !== p || !p.lostAt) return;
+    zlog("drop", { pid: shortId(id), why: "lost", ms: Date.now() - p.lostAt });
+    dropPeer(id, "lost");
+  }, Math.max(1000, max - (Date.now() - p.lostAt)));
+}
+function peerBack(id, rec){
+  const p = peers.get(id); if (!p) return;
+  const was = p.lostAt;
+  clearTimeout(p.lostT); p.lostAt = 0; p.leaving = false;
+  peerClearConn(p);
+  p.rec = rec;
+  p.novid = false;   // пока связи не было, просьба могла смениться — он пришлёт её заново (peerSetup)
+  if (p.tile) p.tile.classList.remove("reconnecting");
+  zlog("back", { pid: shortId(id), ms: was ? Date.now() - was : 0 });
+  if (was && livePeerCount() === 1) toast("Связь восстановлена", 2500);
+  peerSetup(p, id);
 }
 function onPeerBye(id){
   const p = peers.get(id);
   if (!p) return;
   p.leaving = true;
-  dropPeer(id);
+  zlog("bye", { pid: shortId(id) });
+  dropPeer(id, "bye");
 }
 /* есть ли ещё живой собеседник (кроме указанного) — тогда разговор не перезапускаем */
 function anyHealthyPeer(exceptId){
   for (const [pid, p] of peers){
-    if (pid === exceptId || p.leaving) continue;
-    let pc = null;
-    try{ const pcs = p.rec.room.getPeers ? p.rec.room.getPeers() : null; pc = pcs && pcs[pid]; }catch(_){}
+    if (pid === exceptId || p.leaving || p.lostAt) continue;
+    const pc = peerPc(p, pid);
     const st = pc && pc.iceConnectionState;
     if (st === "connected" || st === "completed") return true;
   }
   return false;
 }
-function dropPeer(id){
+function dropPeer(id, why){
   const p = peers.get(id);
   if (!p) return;
-  (p.retryT||[]).forEach(clearTimeout);
-  clearTimeout(p.watchT); clearTimeout(p.restartT);
+  peerClearConn(p); clearTimeout(p.lostT);
   if (p.tile) p.tile.remove();
   peers.delete(id);
   updateCount(); relayout();
-  if (inRoom && peers.size === 0 && hadPeer){ hadPeer = false; onAloneAfterCall(); }
+  if (inRoom && peers.size === 0 && hadPeer){ hadPeer = false; onAloneAfterCall(why); }
   else if (inRoom && scrIsOff && peers.size === 1) setTimeout(applyScrAudio, 0);
 }
 
 /* следим за живостью каналов; если все умерли — переподключаемся */
 function startNetWatch(s){
-  let deadFor = 0, emptyFor = 0;
+  let deadFor = 0, emptyFor = 0, lastNet = netClass();
   const iv = setInterval(()=>{
     if (s !== session || !inRoom){ clearInterval(iv); return; }
+    const nc = netClass();
+    if ((nc === "wifi" || nc === "cellular") && nc !== lastNet){
+      if (lastNet === "wifi" || lastNet === "cellular"){ zlog("net", { from: lastNet, to: nc, call: 1 }); netChangedAt = Date.now(); netKick(); }
+      lastNet = nc;
+    }
     emptyFor = peers.size === 0 ? emptyFor + 3 : 0;            // один в комнате 90 с — выходим сами
     if (emptyFor >= 90){ clearInterval(iv); try{ leaveMeeting("Никто не подключился"); }catch(_){} return; }
     let open = 0;
@@ -1240,7 +1526,7 @@ function setupCallScreen(){
     : "Звоню… ждём ответа.";
   $("btnShareRoom").style.display = "none";
   $("waitOverlay").style.display = "flex";
-  stopTimer(); (function(){var tv=$("timeVal");if(tv)tv.textContent="00:00";else $("timer").textContent="00:00";var ct=$("connType");if(ct)ct.textContent="—";})();
+  stopTimer(); talkAcc = 0; NET = null; (function(){var tv=$("timeVal");if(tv)tv.textContent="00:00";else $("timer").textContent="00:00";var ct=$("connType");if(ct)ct.textContent="—";})();
   updateModeBtn(); updateCtlIcons(); updateCount();
   if (window.AndroidAudio){ syncSpkIcon(); if (!window.__spkPoll) window.__spkPoll = setInterval(syncSpkIcon, 3000); }
   $("scr-call").classList.remove("hideui","pipmode");
@@ -1415,22 +1701,37 @@ function applyZoomLayout(){
 function updateCount(){ $("countPill").textContent = "👤 " + (peers.size + 1); try{ if(window.Android&&Android.setPeers) Android.setPeers(peers.size); }catch(_){} }
 
 /* ───────────── Таймер ───────────── */
+/* v67: время разговора. Перерыв меньше 5 минут (связь оборвалась, перезвонили тому же
+   человеку или в тот же общий созвон) — время и трафик продолжаются, а не начинаются заново. */
+const CALLSTAT_GAP = 5 * 60000;
+let talkAcc = 0;               // накопленное время разговора до текущего отрезка, мс
+function talkMs(){ return talkAcc + (timerInt && timerStart ? Date.now() - timerStart : 0); }
+function fmtDur(ms){ const s = Math.floor(Math.max(0, ms) / 1000); return String(Math.floor(s/60)).padStart(2,"0") + ":" + String(s%60).padStart(2,"0"); }
+function callStatSave(){
+  if (!timerInt || !NET || !roomName) return;
+  try{ localStorage.setItem("zvk_callstat", JSON.stringify({ k: roomName, acc: talkMs(), rx: NET.totalRx, tx: NET.totalTx, at: Date.now() })); }catch(_){}
+}
 function startTimer(){
   if (timerInt) return;
-  timerStart = Date.now();
-  timerInt = setInterval(()=>{
-    const s = Math.floor((Date.now()-timerStart)/1000);
-    (($("timeVal"))||$("timer")).textContent = String(Math.floor(s/60)).padStart(2,"0")+":"+String(s%60).padStart(2,"0");
-  }, 500);
   statsStart();
+  talkAcc = 0;
+  let prev = null; try{ prev = JSON.parse(localStorage.getItem("zvk_callstat") || "null"); }catch(_){}
+  if (prev && prev.k === roomName && Date.now() - (+prev.at || 0) < CALLSTAT_GAP){
+    talkAcc = +prev.acc || 0; NET.totalRx = +prev.rx || 0; NET.totalTx = +prev.tx || 0;
+    zlog("resume", { gap: Date.now() - prev.at, acc: talkAcc });
+  }
+  timerStart = Date.now();
+  const paint = ()=>{ (($("timeVal"))||$("timer")).textContent = fmtDur(talkMs()); statsBarRender(); };
+  timerInt = setInterval(paint, 500);
+  paint();
 }
-function stopTimer(){ clearInterval(timerInt); timerInt = null; statsStop(); }
+function stopTimer(){ if (timerInt){ callStatSave(); talkAcc = talkMs(); } clearInterval(timerInt); timerInt = null; statsStop(); }
 
 /* ───────── Счётчики трафика + сторож зависания (восстановление связи) ───────── */
 let statsInt = null;
 let NET = null;
 let audioCar=false, audioTurn=false, audioScr=false;   // audioScr: «только звук» из-за погасшего экрана (своего или собеседника)
-function netReset(){ NET = { totalRx:0,totalTx:0, prevRawRx:0,prevRawTx:0, prevTs:0, curRx:0,curTx:0, relay:"—", lastRxGrow:Date.now(), lastRxVal:0, turnFlagged:false, carFlagged:false }; audioCar=false; audioTurn=false; audioScr=false; }
+function netReset(){ NET = { totalRx:0,totalTx:0, prevTs:0, ticks:0, curRx:0,curTx:0, relay:"—", lastRxGrow:Date.now(), lastRxVal:0, turnFlagged:false, carFlagged:false }; audioCar=false; audioTurn=false; audioScr=false; }
 /* в автомобиле (Android Auto)? — через нативный мост; на десктопе/iPhone — нет */
 function isCar(){ try{ if(window.Android && Android.isCar) return !!Android.isCar(); }catch(_){} return false; }
 /* месячный расход TURN: лимит ExpressTURN 1000 ГБ, период сбрасывается 3-го числа */
@@ -1444,19 +1745,25 @@ function fmtBytes(b){ b=b||0;
   if (b>=1024)       return (b/1024).toFixed(0)+" КБ";
   return Math.round(b)+" Б"; }
 function fmtRate(bps){ return fmtBytes(bps)+"/с"; }
+function candDesc(c){ if (!c) return ""; return (c.candidateType || "?") + "/" + (c.protocol || "?") + (c.relayProtocol ? "/" + c.relayProtocol : "") + (c.networkType ? "/" + c.networkType : ""); }
 async function netCollect(){
   let rx=0, tx=0, relay=NET?NET.relay:"—";
+  const det = [];
   for (const [id,p] of peers){
-    let pc=null;
-    try{ const pcs=p.rec.room.getPeers?p.rec.room.getPeers():null; pc=pcs&&pcs[id]; }catch(_){}
+    if (p.lostAt) continue;
+    const pc = peerPc(p, id);
     if (!pc||!pc.getStats) continue;
     let rep; try{ rep=await pc.getStats(); }catch(_){ continue; }
-    let selPair=null;
+    let r=0, t=0, selPair=null, au=null, vi=null, vo=null;
     rep.forEach(st=>{
-      if (st.type==="inbound-rtp" && typeof st.bytesReceived==="number") rx+=st.bytesReceived;
-      else if (st.type==="outbound-rtp" && typeof st.bytesSent==="number") tx+=st.bytesSent;
+      if (st.type==="inbound-rtp"){ if (typeof st.bytesReceived==="number") r+=st.bytesReceived; if (st.kind==="audio") au=st; else if (st.kind==="video") vi=st; }
+      else if (st.type==="outbound-rtp"){ if (typeof st.bytesSent==="number") t+=st.bytesSent; if (st.kind==="video") vo=st; }
       else if (st.type==="transport" && st.selectedCandidatePairId) selPair=st.selectedCandidatePairId;
     });
+    if (p.statPc !== pc){ p.statPc = pc; p.sRx = r; p.sTx = t; p.sPl = au ? (au.packetsLost || 0) : 0; p.sPr = au ? (au.packetsReceived || 0) : 0; }   // первый замер — точка отсчёта
+    const dr = r - p.sRx, dt = t - p.sTx; p.sRx = r; p.sTx = t;
+    if (dr > 0) rx += dr;
+    if (dt > 0) tx += dt;
     let best=null;
     rep.forEach(st=>{
       if (st.type!=="candidate-pair") return;
@@ -1464,27 +1771,60 @@ async function netCollect(){
       else if (!best && st.state==="succeeded" && (st.nominated||st.selected||st.writable)) best=st;
     });
     if (!best) rep.forEach(st=>{ if(!best && st.type==="candidate-pair" && st.state==="succeeded") best=st; });
+    let path = "", rtt = null;
     if (best){
       const loc = rep.get ? rep.get(best.localCandidateId) : null;
+      const rem = rep.get ? rep.get(best.remoteCandidateId) : null;
       const ct = loc && loc.candidateType;
       if (ct) relay = ct==="relay" ? "TURN" : ((ct==="srflx"||ct==="prflx") ? "P2P-N" : "P2P");
+      path = candDesc(loc) + " ↔ " + candDesc(rem);
+      if (typeof best.currentRoundTripTime === "number") rtt = Math.round(best.currentRoundTripTime * 1000);
     }
+    let loss = null;
+    if (au && typeof au.packetsReceived === "number"){
+      const pl = (au.packetsLost || 0) - p.sPl, pr = au.packetsReceived - p.sPr;
+      if (pl + pr > 0) loss = Math.round(Math.max(0, pl) * 1000 / (Math.max(0, pl) + Math.max(0, pr))) / 10;
+      p.sPl = au.packetsLost || 0; p.sPr = au.packetsReceived;
+    }
+    det.push({ id, p, path, rtt, loss, dr: dr > 0 ? dr : 0, dt: dt > 0 ? dt : 0, ice: pc.iceConnectionState,
+      jit: au && typeof au.jitter === "number" ? Math.round(au.jitter * 1000) : null,
+      fps: vi && vi.framesPerSecond != null ? Math.round(vi.framesPerSecond) : null,
+      res: vi && vi.frameWidth ? vi.frameWidth + "x" + vi.frameHeight : "",
+      ofps: vo && vo.framesPerSecond != null ? Math.round(vo.framesPerSecond) : null,
+      ql: vo && vo.qualityLimitationReason && vo.qualityLimitationReason !== "none" ? vo.qualityLimitationReason : "" });
   }
-  return { rx, tx, relay };
+  return { rx, tx, relay, det };
 }
 function netTick(){
-  if (!NET) return;
+  if (!NET || NET.busy) return;
+  const N0 = NET; N0.busy = true;
   netCollect().then(d=>{
-    if (!NET) return;
+    N0.busy = false;
+    if (!NET || NET !== N0) return;
     const now=Date.now();
-    const dRx=d.rx-NET.prevRawRx, dTx=d.tx-NET.prevRawTx;
+    const dRx=d.rx, dTx=d.tx;            // v67: уже приращения — по каждому соединению отдельно
     if (dRx>0) NET.totalRx+=dRx;
     if (dTx>0) NET.totalTx+=dTx;
     if (d.relay==="TURN"){ var addb=(dRx>0?dRx:0)+(dTx>0?dTx:0); if(addb>0) turnMonthAdd(addb); }
+    /* v67: данные перестали приходить — только запись в журнал. Раньше здесь включался режим
+       «только через реле» с перезагрузкой страницы: у собеседника рвался разговор, а звонок
+       до конца шёл через TURN. Связь чинит watchConnection по состоянию ICE. */
     if (dRx>0) NET.lastRxGrow=now;
-    else if (inRoom && peers.size>0 && NET.relay!=="TURN" && now-NET.lastRxGrow>12000){ NET.lastRxGrow=now; triggerAutoRelay(); }
+    else if (inRoom && livePeerCount()>0 && now-NET.lastRxGrow>12000){ NET.lastRxGrow=now; zlog("nomedia", { path: NET.relay }); }
     if (NET.prevTs){ const dt=(now-NET.prevTs)/1000; if(dt>0){ NET.curRx=dRx>0?dRx/dt:0; NET.curTx=dTx>0?dTx/dt:0; } }
-    NET.prevRawRx=d.rx; NET.prevRawTx=d.tx; NET.prevTs=now; NET.relay=d.relay;
+    NET.prevTs=now; NET.relay=d.relay;
+    /* журнал: смена пути — сразу, показатели — раз в 30 с */
+    NET.ticks=(NET.ticks||0)+1;
+    for (const x of d.det){
+      if (x.path && x.p.pathKey !== x.path){ x.p.pathKey = x.path; zlog("path", { pid: shortId(x.id), path: x.path, rtt: x.rtt }); }
+      const up = x.ice === "connected" || x.ice === "completed";
+      if (x.dr > 0 || !up) x.p.noRx = 0;
+      else if (!x.p.noRx) x.p.noRx = now;
+      else if (now - x.p.noRx > 12000 && x.path && !/^relay/.test(x.path)){ x.p.noRx = 0; zlog("nomedia", { pid: shortId(x.id), path: x.path }); relayFallback("nomedia", x.id); }
+      if (NET.ticks % 12 === 0) zlog("st", { pid: shortId(x.id), rtt: x.rtt, jit: x.jit, loss: x.loss, fps: x.fps, res: x.res, ofps: x.ofps, ql: x.ql,
+        kin: Math.round(x.dr * 8 / 2500), kout: Math.round(x.dt * 8 / 2500), tot: Math.round((NET.totalRx + NET.totalTx) / 1048576) });
+    }
+    callStatSave();
     // авто «только звук»: через TURN на мобильной (экономия 500 МБ) ИЛИ в автомобиле (Android Auto)
     if (peers.size <= 1 && isCar() && !NET.carFlagged){
       NET.carFlagged=true; try{ applyAudioOnly(true,true,"car"); }catch(_){}
@@ -1493,22 +1833,17 @@ function netTick(){
     // в машине в общем разговоре: остальные видят друг друга, а нам видео не шлют
     if (inRoom && peers.size > 1 && !noVidSent && isCar()){ setNoVid(true); toast("Звонок в автомобиле — только звук"); }
     else if (inRoom && noVidSent && !scrIsOff && !isCar()) setNoVid(false);
-    // Сторож «по байтам» убран: в аудио тишина (пауза в разговоре) давала ложные
-    // срабатывания и рвала связь. Переподключением занимается watchConnection —
-    // по реальному состоянию ICE (disconnected/failed), с паузой ~7 сек.
     netRender();
-  }).catch(()=>{});
+  }).catch(()=>{ N0.busy = false; });
 }
 function netRender(){
   if (!NET) return;
   const np=$("netPill"); if(np) np.textContent="⇅ "+fmtBytes(NET.totalRx+NET.totalTx);
   const ctp=$("connType"); if(ctp) ctp.textContent=NET.relay;
-  const sb=$("statsBar");
-  if (sb && sb.classList.contains("on"))
-    sb.textContent="⇅ "+fmtBytes(NET.totalRx+NET.totalTx)+" • ↓"+fmtRate(NET.curRx)+" ↑"+fmtRate(NET.curTx)+" • "+NET.relay;
+  statsBarRender();
   const ov=$("netOverlay");
   if (ov && ov.classList.contains("show")){
-    const dur=timerStart?Math.max(1,(Date.now()-timerStart)/1000):1;
+    const dur=Math.max(1,talkMs()/1000);
     const set=(idn,v)=>{ const e=$(idn); if(e) e.textContent=v; };
     set("nmCurRx",fmtRate(NET.curRx)); set("nmCurTx",fmtRate(NET.curTx));
     set("nmAvgRx",fmtRate(NET.totalRx/dur)); set("nmAvgTx",fmtRate(NET.totalTx/dur));
@@ -1517,29 +1852,17 @@ function netRender(){
     set("nmTurnMonth",(turnMonthGet().used/1073741824).toFixed(2)+" из 1000 ГБ");
   }
 }
+/* полоска поверх экрана: время разговора, трафик, скорость, путь */
+function statsBarRender(){
+  const sb=$("statsBar");
+  if (!sb || !NET || !sb.classList.contains("on")) return;
+  sb.textContent="⏱ "+fmtDur(talkMs())+" • ⇅ "+fmtBytes(NET.totalRx+NET.totalTx)+" • ↓"+fmtRate(NET.curRx)+" ↑"+fmtRate(NET.curTx)+" • "+NET.relay;
+}
 function statsStart(){ netReset(); if(statsInt) return; statsInt=setInterval(netTick,2500); }
 function statsStop(){ clearInterval(statsInt); statsInt=null; }
 function openNetMenu(){ const ov=$("netOverlay"); if(ov){ ov.classList.add("show"); netRender(); } }
 function closeNetMenu(){ const ov=$("netOverlay"); if(ov) ov.classList.remove("show"); }
 function applyStatsBarPref(){ try{ const on=localStorage.getItem("zvk_stats_bar")==="1"; const sb=$("statsBar"); if(sb) sb.classList.toggle("on",on); const sc=$("scr-call"); if(sc) sc.classList.toggle("statson",on); const cb=$("nmBarToggle"); if(cb) cb.checked=on; }catch(_){} }
-let autoRelayFired=false;
-async function triggerAutoRelay(){
-  if (autoRelayFired) return;
-  if (peers.size > 1 && anyHealthyPeer()) return;     // с кем-то связь есть — не рвём разговор всем
-  try{ if (sessionStorage.getItem("zvk_auto_relay")==="1") return; }catch(_){}
-  autoRelayFired = true;
-  /* реле может быть недоступно (бесплатный сервер) — тогда переезд «только через
-     реле» добьёт звонок; проверяем реле и при мёртвом остаёмся на прямом */
-  let alive=false;
-  try{ alive = await probeTurn(SELF_TURN.concat(EXPRESS_TURN), 4000); }catch(_){}
-  if (!alive){ autoRelayFired=false; return; }
-  try{ sessionStorage.setItem("zvk_auto_relay","1"); }catch(_){}
-  toast("Прямое соединение не пошло — переключаюсь через реле…");
-  const v = (withVideo && !audioOnly) ? "1" : "0";
-  const nm = callLabel ? ("&name="+encodeURIComponent(callLabel)) : "";
-  const rm = roomName ? ("&room="+encodeURIComponent(roomName)) : "";
-  setTimeout(()=>{ try{ location.replace(location.pathname+"?autojoin=1&relay=1&video="+v+nm+rm); }catch(_){ location.reload(); } }, 700);
-}
 async function probeTurn(servers, ms){
   let ok=false, pc=null;
   try{
@@ -2104,7 +2427,7 @@ function hardCleanup(){
   try{ clearInterval(ringRepeatT); ringRepeatT=null; }catch(_){}
   const old=rooms; rooms=[];
   old.forEach(r=>{ try{ r.room.leave(); }catch(_){} });
-  try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
+  try{ peers.forEach(p=>{ peerClearConn(p); clearTimeout(p.lostT); }); }catch(_){}
   peers=new Map();
   try{ stopTimer(); }catch(_){}
 }
@@ -2503,15 +2826,19 @@ function joinLobby(){
   if (lobby) return;
   const my=getMySlot(); if(!my) return;
   try{
-    const room=Trystero.joinNostr({ appId:APP_ID, password:"pw-"+LOBBY_ROOM, rtcConfig:iceConfig(), trickleIce:true, relayConfig:{ urls: RELAYS } }, roomIdFromName(LOBBY_ROOM));
+    const lrtc=iceConfig();
+    const room=Trystero.joinNostr({ appId:APP_ID, password:"pw-"+LOBBY_ROOM, rtcConfig:lrtc, trickleIce:true, relayConfig:{ urls: RELAYS } }, roomIdFromName(LOBBY_ROOM));
     const ringAct=room.makeAction("ring");
     const presAct=room.makeAction("pres");
-    lobby={ room,
+    const logAct=room.makeAction("log");   // v67: журналы — Мише, когда сервер недоступен
+    lobby={ room, rtc: lrtc,
       sendRing:(d,target)=>{ try{ const r=ringAct.send(d,target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
-      sendPres:(target)=>{ try{ const m=getMySlot(); const r=presAct.send({slot:m,name:slotName(m),tok:myPushTarget(),plat:myPlatform(),v:PROTO},target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
+      sendPres:(target)=>{ try{ const m=getMySlot(); const r=presAct.send({slot:m,name:slotName(m),tok:myPushTarget(),plat:myPlatform(),v:PROTO,av:APP_VER,toks:tokGossip()},target?{targets:[target]}:undefined); r&&r.catch&&r.catch(()=>{});}catch(_){} },
+      sendLog:(d,target)=>{ try{ const r=logAct.send(d,{targets:[target]}); r&&r.catch&&r.catch(()=>{});}catch(_){} },
       slotByPeer:new Map() };
-    ringAct.onMessage=(d,ctx)=>{ if(d&&typeof d==="object") onRing(Object.assign({},d,{viaLobby:true})); };
-    presAct.onMessage=(d,ctx)=>{ if(d&&d.slot&&ctx){ lobby.slotByPeer.set(ctx.peerId,d.slot); setProto(d.slot, (+d.v>=2)?2:1); if(d.name && !isPlaceholderName(d.name) && !isOldName(d.slot, d.name)){ lobbyNames[d.slot]=d.name; saveLobbyNames(); } if(d.tok){ cacheToken(d.slot, d.tok, d.plat); } recountOnline(); } };
+    ringAct.onMessage=(d,ctx)=>{ if(d&&typeof d==="object") onRing(Object.assign({},d,{viaLobby:true,pid:ctx&&ctx.peerId})); };
+    logAct.onMessage=(d,ctx)=>{ if(!d||!ctx) return; if(d.ack){ logAcked(String(d.ack)); return; } if(getMySlot()===1 && Array.isArray(d.items)){ logIngest(d.items); if(d.bid && lobby) lobby.sendLog({ack:String(d.bid)}, ctx.peerId); } };
+    presAct.onMessage=(d,ctx)=>{ if(d&&d.slot&&ctx){ lobby.slotByPeer.set(ctx.peerId,d.slot); setProto(d.slot, (+d.v>=2)?2:1); if(d.name && !isPlaceholderName(d.name) && !isOldName(d.slot, d.name)){ lobbyNames[d.slot]=d.name; saveLobbyNames(); } if(d.tok){ cacheToken(d.slot, d.tok, d.plat, ownTs(d)); } if(d.toks) mergeTokStore(d.toks); recountOnline(); if(+d.slot===1 && logErrN && logQ.length) setTimeout(logToMisha, 3000); } };
     room.onPeerJoin=(id)=>{ lobby&&lobby.sendPres(id); };
     room.onPeerLeave=(id)=>{ if(lobby){ lobby.slotByPeer.delete(id); recountOnline(); } };
     lobbyOnline=new Set([my]); renderMenuAll();
@@ -2553,18 +2880,36 @@ function onRing(d){
   if(!d || typeof d!=="object") return;
   const my=getMySlot();
   const from=+d.from||0, to=+d.to||0;
+  /* v67: этот же человек ответил на другом своём устройстве — здесь перестаём звонить */
+  if (d.t==="answered"){
+    if (from===my && incoming && !incoming.all && incoming.from===to && (!d.cid || !incoming.cid || d.cid===incoming.cid)) answeredElsewhere();
+    if (outgoing && to===my && from===outgoing.to && (!d.cid || !outgoing.cid || d.cid===outgoing.cid)) outgoing.answered = true;   // отказ другого его устройства уже не в счёт
+    return;
+  }
+  /* v67: собеседник положил трубку — дублируем «до свидания» через «прихожую» */
+  if (d.t==="hangup"){
+    if (inRoom && d.room===roomName && d.pid && peers.has(d.pid)) onPeerBye(d.pid);
+    else if (inRoom && d.room===roomName && peers.size===0 && !hadPeer && from && from===pairOther(roomName)) leaveMeeting("Собеседник завершил разговор");   // ответили, а он уже ушёл
+    return;
+  }
   if (d.t==="cancel"){
     if(!incoming || from!==incoming.from) return;               // отменили чужой вызов — не наш
     if(to!==0 && to!==my) return;
     if(d.cid && incoming.cid && d.cid!==incoming.cid) return;
+    if (d.ans){ if (!incoming.all) answeredElsewhere(d.dec ? "Отклонено на другом устройстве" : ""); return; }   // звонящий: ответили (отклонили) на другом устройстве
     const inc=incoming; markHandled(inc);
+    zlog("cancel-in", { from: from, cid: d.cid });
     try{ if(window.Android&&Android.missedCall) Android.missedCall(inc.all?("Общий созвон ("+inc.name+")"):inc.name); }catch(_){}
     nativeIncomingEnded(true);
     hideIncoming(); backToWhereWeWere();
     return;
   }
   if (d.t==="decline"){
+    /* v67: этот же человек отклонил вызов на другом своём устройстве */
+    if (from===my && incoming && !incoming.all && incoming.from===to && (!d.cid || !incoming.cid || d.cid===incoming.cid)){ answeredElsewhere("Отклонено на другом устройстве"); return; }
     if(outgoing && to===my && from===outgoing.to && (!d.cid || !outgoing.cid || d.cid===outgoing.cid)){
+      if (outgoing.answered) return;                                         // на другом его устройстве уже ответили
+      if (outgoing.to && !outgoing.ansSent){ outgoing.ansSent = true; ringAnswered(outgoing, true); }   // остальные его устройства — не звонить
       const own=outgoing.own; clearTimeout(outTimer); outgoing=null; clearInterval(ringRepeatT); ringRepeatT=null;
       if(own && peers.size===0){ leaveMeeting(displayName(from)+": вызов отклонён"); }   // и если камера ещё включалась
       else setMenuNote(displayName(from)+": не сейчас");
@@ -2602,8 +2947,32 @@ function onRing(d){
     }
     incoming={ from, to, video:(d.video!==false && d.video!==0), all:(to===0), name:callerName(d.name, from),
                room, cid:d.cid||"", guessed:!isRoomName(d.room) };
+    zlog("ring", { from: from, via: d.viaLobby ? "lobby" : (d.viaPush ? "push" : "app"), cid: d.cid, all: to===0 ? 1 : 0 });
     showIncoming();
   }
+}
+/* второй участник комнаты пары p-A-B-… (не мы); 0 — не комната пары */
+function pairOther(room){ const m = /^p-(\d+)-(\d+)-/.exec(room || ""); if (!m) return 0; const a = +m[1], b = +m[2], my = getMySlot(); return a === my ? b : (b === my ? a : 0); }
+/* ответили (или отклонили) на другом устройстве этого же человека — без «пропущенного» */
+function answeredElsewhere(note){
+  if (!incoming) return;
+  const inc = incoming; markHandled(inc);
+  zlog("ans-else", { from: inc.from, cid: inc.cid, dec: note ? 1 : 0 });
+  nativeIncomingEnded(false);
+  hideIncoming(); backToWhereWeWere();
+  setMenuNote(note || "Ответили на другом устройстве");
+}
+/* звонящий: личный вызов приняли (declined — отклонили) — отмена остальным устройствам (через
+   «прихожую» несколько раз: её ловит и телефон, разбуженный пушем позже; и пушем — тем, кто без приложения) */
+function ringAnswered(out, declined){
+  const my = getMySlot();
+  const c = { t:"cancel", ans:1, from:my, to:out.to, room:out.room||"", cid:out.cid||"" };
+  if (declined) c.dec = 1;
+  let n = 0;
+  const tick = ()=>{ if (outgoing && outgoing.cid !== out.cid) return; if (lobby) lobby.sendRing(c); if (++n < 4) setTimeout(tick, 3000); };
+  tick();
+  pushCancel(out.to, out.cid, true);
+  zlog(declined ? "declined" : "answered", { to: out.to, cid: out.cid });
 }
 function nativeIncomingEnded(missed){
   try{ if(window.Android&&Android.incomingEnded){ Android.incomingEnded(!!missed); return; } }catch(_){}
@@ -2633,6 +3002,7 @@ function scheduleCarAutoAnswer(){
 function onNoAnswer(){
   if(!incoming) return;
   const inc=incoming; markHandled(inc);
+  zlog("missed", { from: inc.from, cid: inc.cid });
   try{ if(window.Android&&Android.missedCall) Android.missedCall(inc.all?("Общий созвон ("+inc.name+")"):inc.name); }catch(_){}
   nativeIncomingEnded(true);          // система гасит экран и убирает окно, если поднимала его ради звонка
   hideIncoming(); backToWhereWeWere();
@@ -2645,6 +3015,9 @@ function acceptCall(videoOverride){
   if (isCar()) video=false;                                     // в машине — только звук
   const nm=inc.all?"Общий созвон":inc.name;
   markHandled(inc);
+  zlog("accept", { from: inc.from, video: video ? 1 : 0, guessed: inc.guessed ? 1 : 0, cid: inc.cid });
+  /* v67: другие устройства этого же человека перестают звонить */
+  if (!inc.all && lobby) lobby.sendRing({ t:"answered", from:getMySlot(), to:inc.from, cid:inc.cid||"" });
   clearTimeout(incomingTimer); clearTimeout(carAnsT); stopRing(); incoming=null;
   try{
     if(window.Android&&Android.callAnswered) Android.callAnswered(!!video);
@@ -2664,6 +3037,7 @@ function acceptCall(videoOverride){
 function declineCall(){
   if(!incoming) return;
   const inc=incoming; markHandled(inc);
+  zlog("decline", { from: inc.from, cid: inc.cid });
   if(lobby) lobby.sendRing({t:"decline",from:getMySlot(),to:inc.from,room:inc.room||GENERAL_ROOM,cid:inc.cid||""});
   nativeIncomingEnded(false);
   hideIncoming(); backToWhereWeWere();
@@ -2697,20 +3071,22 @@ function callContact(slot, video){
     if(inRoom && peers.size===0 && outgoing && outgoing.cid===cid && outgoing.own && roomName===room) leaveMeeting(displayName(slot)+" не отвечает");
     else if(outgoing && outgoing.cid===cid) outgoing=null;
   }, 50000);
+  zlog("call", { to: slot, video: video ? 1 : 0, pair: /^p-/.test(room) ? 1 : 0, cid: cid, net: netClass() });
   sendRingRepeated({t:"call",from:my,to:slot,room,video,name:slotName(my),v:PROTO,cid}, 40000);
-  pushCall(slot, video, cid);       // разбудить телефон, если приложение закрыто
+  pushCall(slot, video, cid, room); // разбудить телефон, если приложение закрыто
   if(!inRoom){ enterMeeting(video, room); nativeCallStarted(slot, video); }
   setMenuNote("Звоню "+displayName(slot)+"…");
 }
-function callGeneral(video){
+function callGeneral(video, src){
   primeAudio(); const my=getMySlot(); if(!my) return;
   if (isCar()) video=false;
   closeMenu();
   const room=(inRoom && roomName) ? roomName : GENERAL_ROOM, cid=newCid();
   if(!inRoom){ callLabel="Общий созвон"; callIn=false; }
   outgoing={to:0, cid, room}; clearTimeout(outTimer); outTimer=setTimeout(()=>{ outgoing=null; },40000);
+  zlog("call", { to: 0, video: video ? 1 : 0, cid: cid, net: netClass(), src: src || "", inRoom: inRoom ? 1 : 0 });
   sendRingRepeated({t:"call",from:my,to:0,room,video,name:slotName(my),v:PROTO,cid}, 40000);
-  pushCall(0, video, cid);          // разбудить всех, у кого приложение закрыто
+  pushCall(0, video, cid, room);    // разбудить всех, у кого приложение закрыто
   if(!inRoom){ enterMeeting(video, room); nativeCallStarted(0, video); }
   setMenuNote("Звоню всем…");
 }
@@ -2724,7 +3100,10 @@ function enterMeeting(video, room){
 function sendByeAll(){ for(const rec of rooms){ try{ rec.sendBye && rec.sendBye(); }catch(_){} } }
 /* общее завершение: сообщить «до свидания», отменить дозвон, освободить камеру и систему */
 function leaveMeetingCore(){
-  closeMenu(); session++;
+  closeMenu();
+  try{ if (inRoom && lobby && roomName) lobby.sendRing({ t:"hangup", from:getMySlot(), room:roomName }); }catch(_){}   // v67: «до свидания» и через «прихожую»
+  if (inRoom) zlog("end", { dur: Math.round(talkMs() / 1000), mb: NET ? Math.round((NET.totalRx + NET.totalTx) / 1048576 * 10) / 10 : 0, peers: peers.size, path: NET ? NET.relay : "" });
+  session++;
   clearInterval(ringRepeatT); ringRepeatT=null; acceptedGuess=null;
   try{ if(outgoing && peers.size===0){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:outgoing.room||GENERAL_ROOM,cid:outgoing.cid||""}); pushCancel(outgoing.to, outgoing.cid); } }catch(_){}  // отменяем дозвон у получателя (реле + пуш)
   outgoing=null; clearTimeout(outTimer);
@@ -2732,9 +3111,11 @@ function leaveMeetingCore(){
   try{ if(window.Android&&Android.endCall) Android.endCall(); }catch(_){}     // закрыть системный звонок (Telecom/Auto)
   try{ if(window.Android&&Android.setInCall) Android.setInCall(false); }catch(_){}   // убрать «Идёт звонок», отпустить экран
   const oldRooms=rooms; rooms=[];
+  const relayPcs=[]; try{ peers.forEach((p,id)=>{ if(p.relay){ const pc=peerPc(p,id); if(pc) relayPcs.push(pc); } }); }catch(_){}
   setTimeout(()=>{ oldRooms.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
+  if (relayPcs.length){ zlog("relay-off", { n: relayPcs.length }); setTimeout(()=>{ relayPcs.forEach(pcFromRelay); }, 1500); }   // v67: следующий звонок — снова с прямого пути
   try{ clearInterval(window.__spkPoll); window.__spkPoll=null; }catch(_){}
-  try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
+  try{ peers.forEach(p=>{ peerClearConn(p); clearTimeout(p.lostT); }); }catch(_){}
   peers=new Map(); hadPeer=false; scrPaused=null; scrAudio=false; scrIsOff=false; noVidSent=false; camUserOff=false; clearTimeout(scrT);
   try{ if(localStream){ localStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){} }); } }catch(_){}
   localStream=null; inRoom=false; try{ stopTimer(); }catch(_){}
@@ -2742,8 +3123,10 @@ function leaveMeetingCore(){
   const grid=$("grid"); if(grid) grid.innerHTML="";
 }
 function leaveMeeting(note){
+  if (inRoom) zlog("leave", { why: note || "" });
   leaveMeetingCore();
   openStandby(note);
+  setTimeout(function(){ logUpload(true); }, 3000);
 }
 /* перейти в другой разговор (приняли второй вызов) */
 function switchMeeting(room, video, label, who){
@@ -2757,7 +3140,8 @@ function retargetRoom(name){
   try{ sendByeAll(); }catch(_){}
   const old=rooms; rooms=[];
   setTimeout(()=>{ old.forEach(r=>{ try{ r.room.leave(); }catch(_){} }); }, 300);   // «до свидания» успевает уйти
-  try{ peers.forEach(p=>{ (p.retryT||[]).forEach(clearTimeout); clearTimeout(p.watchT); clearTimeout(p.restartT); if(p.leaveT) clearTimeout(p.leaveT); }); }catch(_){}
+  try{ peers.forEach(p=>{ peerClearConn(p); clearTimeout(p.lostT); }); }catch(_){}
+  zlog("retarget", { pair: /^p-/.test(name) ? 1 : 0 });
   session++; peers=new Map(); hadPeer=false; noVidSent=false;
   roomName=name; roomId=roomIdFromName(name);
   const s=session;
@@ -2765,7 +3149,7 @@ function retargetRoom(name){
   setWaitStatus("Подключаюсь к звонящему…");
   joinAll(s); startNetWatch(s);
 }
-function onAloneAfterCall(){ leaveMeeting("Собеседник завершил разговор"); }
+function onAloneAfterCall(why){ leaveMeeting(why === "lost" ? "Связь с собеседником потеряна" : "Собеседник завершил разговор"); }
 
 /* ── меню (один и тот же список для standby и оверлея) ── */
 function buildContactRows(into){
@@ -2824,7 +3208,7 @@ function startApp(){
 /* ── привязка кнопок ── */
 function wireUI(){
   const bind=(id,fn)=>{ const el=$(id); if(el) el.onclick=fn; };
-  bind("btnCallAll",()=>callGeneral(true));
+  bind("btnCallAll",()=>callGeneral(true, "home"));
   bind("btnReturnRoom",()=>{ if(inRoom) show("scr-call"); });
   bind("btnRingtone",()=>{
     if(window.Android && Android.pickRingtone){ try{ Android.pickRingtone(); }catch(_){} return; }
@@ -2840,7 +3224,7 @@ function wireUI(){
       const row=$("carAutoRow"); if(row && !(window.Android)) row.style.display="none";
     }
   })();
-  bind("menuGeneral",()=>callGeneral(true));
+  bind("menuGeneral",()=>callGeneral(true, "menu"));
   bind("btnAccept",acceptCall);
   bind("btnDecline",declineCall);
   bind("btnCancel",()=>{ if(outgoing){ if(lobby) lobby.sendRing({t:"cancel",from:getMySlot(),to:outgoing.to,room:outgoing.room||GENERAL_ROOM,cid:outgoing.cid||""}); pushCancel(outgoing.to, outgoing.cid); } clearInterval(ringRepeatT); ringRepeatT=null; outgoing=null; backToWhereWeWere(); });
@@ -2856,6 +3240,8 @@ function wireUI(){
   const pu=$("pushUrl2");
   if(pu){ try{ pu.value=localStorage.getItem("zvk_push_url")||""; }catch(_){} bind("btnSavePush2",()=>{ try{ localStorage.setItem("zvk_push_url",(pu.value||"").trim()); }catch(_){} const sv=$("btnSavePush2"); if(sv){ sv.textContent="✓ Сохранено"; setTimeout(()=>sv.textContent="Сохранить пуш-сервер",1600);} }); }
   bind("btnIosPush",()=>{ if(window.__enableIosPush) window.__enableIosPush(); });
+  bind("btnLog", logButton);
+  try{ const ls=$("logState"); if(ls && getMySlot()===1) ls.textContent="отправить и сохранить файлом"; }catch(_){}
   bind("btnCallScreen",()=>{ try{ if(window.Android && Android.openCallScreenSettings) Android.openCallScreenSettings(); }catch(_){} });
   document.querySelectorAll("details.settings").forEach(d=>d.addEventListener("toggle", csRefresh));
   csRefresh();
@@ -2904,9 +3290,47 @@ document.addEventListener("visibilitychange", ()=>{
   } else if(inRoom && window.Android){
     clearTimeout(scrT); scrT=setTimeout(()=>{ if(document.hidden) screenOff(); }, 1500);
   }
+  if(document.visibilityState!=="visible"){ logSaveNow(); logUpload(false); }
 });
 
 /* ───────────── Сигналы от системы Android ───────────── */
+/* ⚙ «Журнал соединений»: отправить очередь на сервер сейчас; у Миши — ещё и сохранить
+   весь собранный журнал (свой и присланный другими) файлом */
+function logButton(){
+  const st = $("logState");
+  const n = logQ.length;
+  if (st) st.textContent = "отправляю…";
+  logUpload(true, function(r, k){
+    const msg = r === "server" ? ("отправлено на сервер: " + (n > k ? k + " из " + n + ", остальное следом" : k))
+      : r === "misha" ? ("сервер недоступен — передаю Мише: " + k)
+      : r === "empty" ? "нового нет — всё уже на сервере"
+      : r === "busy" ? "уже отправляется…"
+      : ("сервер недоступен — хранится здесь: " + logQ.length);
+    if (st) st.textContent = msg;
+    toast("📋 Журнал: " + msg, 4000);
+  });
+  if (getMySlot() === 1) logSaveFile();
+}
+function logSaveFile(){
+  const items = lsArr("zvk_logarch");
+  if (!items.length){ toast("Журнал пуст", 2500); return; }
+  const d = new Date(), pad = x => String(x).padStart(2, "0");
+  const name = "zvonok-log-" + d.getFullYear() + pad(d.getMonth()+1) + pad(d.getDate()) + "-" + pad(d.getHours()) + pad(d.getMinutes()) + ".txt";
+  const text = items.map(x => JSON.stringify(x)).join("\n") + "\n";
+  try{
+    if (window.Android && Android.saveFile){
+      const where = Android.saveFile(name, text);
+      toast(where ? ("📋 Сохранено: " + where) : "Не удалось сохранить файл", 6000);
+      return;
+    }
+  }catch(_){}
+  try{
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(new Blob([text], { type: "text/plain" }));
+    a.download = name; document.body.appendChild(a); a.click();
+    setTimeout(() => { try{ URL.revokeObjectURL(a.href); a.remove(); }catch(_){} }, 2000);
+  }catch(e){ toast("Не удалось сохранить файл", 3000); }
+}
 function safeDecode(x){ try{ return decodeURIComponent(x); }catch(_){ return x; } }
 window.__nativeIncoming=function(o){ try{ o=o||{}; const from=+o.caller||0; if(!from) return;
   onRing({ t:"call", from, to: o.all?0:(+o.to||getMySlot()), video:o.video!==false, name:callerName(o.name, from) }); }catch(_){} };
@@ -2979,6 +3403,8 @@ let bootExitMsg = "";
 /* ───────────── Запуск приложения ───────────── */
 (function boot(){
   if (HEADLESS){ startHeadless(); return; }   // фоновый слушатель звонков — без интерфейса
+  zlog("boot", { how: __P.get("autojoin")==="1" ? "answer" : (__P.get("incoming")==="1" ? "incoming" : (window.__rejoining ? "rejoin" : "start")),
+    pl: myPlatform(), net: netClass(), ua: String(navigator.userAgent || "").slice(0, 140) });
   wireUI();
   /* «разбудить» звук по первому касанию — нужно для iOS, чтобы рингтон мог играть */
   const prime=()=>{ primeAudio(); document.removeEventListener("touchend",prime); document.removeEventListener("click",prime); };

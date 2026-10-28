@@ -1,6 +1,8 @@
-/* Звонок — сервис-воркер для пуша на iPhone (PWA с домашнего экрана, iOS 16.4+).
-   Принимает Web Push и показывает уведомление о входящем звонке; по тапу
-   открывает приложение и сразу входит в общую комнату (?autojoin=1). */
+/* Звонок — сервис-воркер для пуша на iPhone (PWA с домашнего экрана, iOS 16.4+) и ноутбука.
+   Принимает Web Push и показывает уведомление о входящем звонке; по нажатию открывает
+   приложение и сразу входит в разговор со звонящим (?autojoin=1&caller=…&room=…).
+   v67: раньше в адресе не было звонящего — ответ уходил в общую комнату («случайный общий созвон»).
+   Уведомление старше минуты по нажатию только открывает приложение: вызов давно закончился. */
 
 self.addEventListener("install", function (e) { self.skipWaiting(); });
 self.addEventListener("activate", function (e) { e.waitUntil(self.clients.claim()); });
@@ -13,7 +15,7 @@ self.addEventListener("push", function (e) {
   var kind = d.kind || "call";
 
   if (kind === "cancel") {
-    // звонящий отменил — гасим уведомление
+    // звонящий отменил (или ответили на другом устройстве) — гасим уведомление
     e.waitUntil(
       self.registration.getNotifications({ tag: "zvonok-call" })
         .then(function (ns) { ns.forEach(function (n) { n.close(); }); })
@@ -23,15 +25,16 @@ self.addEventListener("push", function (e) {
 
   var name = d.name || "Звонок";
   var video = (d.video === "1" || d.video === 1);
-  var body = video ? "Входящий видеозвонок" : "Входящий звонок";
+  var all = String(d.to) === "0";
+  var body = all ? ("Общий созвон — звонит " + name) : (video ? "Входящий видеозвонок" : "Входящий звонок");
 
   e.waitUntil(
-    self.registration.showNotification(name, {
+    self.registration.showNotification(all ? "Общий созвон" : name, {
       body: body,
       tag: "zvonok-call",
       renotify: true,
       requireInteraction: true,
-      data: { caller: d.caller, video: d.video, to: d.to }
+      data: { caller: d.caller, video: d.video, to: d.to, name: d.name || "", room: d.room || "", cid: d.cid || "", ts: Date.now() }
     })
   );
 });
@@ -39,8 +42,17 @@ self.addEventListener("push", function (e) {
 self.addEventListener("notificationclick", function (e) {
   e.notification.close();
   var data = e.notification.data || {};
-  var video = (data.video === "1" || data.video === 1) ? "1" : "0";
-  var url = "./?autojoin=1&video=" + video;
+  var url = "./";
+  if (data.ts && Date.now() - data.ts < 60000) {
+    var video = (data.video === "1" || data.video === 1) ? "1" : "0";
+    var all = String(data.to) === "0" ? "1" : "0";
+    url = "./?autojoin=1&video=" + video +
+      "&caller=" + encodeURIComponent(data.caller || 0) +
+      "&to=" + encodeURIComponent(data.to || 0) +
+      "&all=" + all +
+      (data.room ? "&room=" + encodeURIComponent(data.room) : "") +
+      (data.name ? "&name=" + encodeURIComponent(data.name) : "");
+  }
   e.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(function (list) {
       for (var i = 0; i < list.length; i++) {
