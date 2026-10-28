@@ -360,6 +360,7 @@ body.light .contactrow .ca{background:rgba(0,0,0,.05);border-color:rgba(0,0,0,.1
   <input type="file" id="fileInput" style="display:none">
   <div id="xfers"></div>
   <div id="toast"></div>
+  <div id="carDark" style="display:none;position:fixed;inset:0;z-index:99;background:#000"></div>
   <div id="statsBar"></div>
 
   <!-- подробные счётчики трафика (тап по ⇅) -->
@@ -562,7 +563,7 @@ const EXPRESS_TURN = [
 
 const APP_ID = "mk-zvonok-3";
 const PROTO = 2;   // v60: личные звонки — в отдельной комнате пары, общий созвон — в общей
-const APP_VER = 67;   // v67: номер версии страницы (пишется в журнал соединения)
+const APP_VER = 68;   // номер версии страницы (пишется в журнал соединения); v68 — patch39
 /* отобранные вручную, проверенные на живость реле (одинаковые у всех — точка встречи) */
 const RELAYS = [
   "wss://nos.lol",
@@ -934,6 +935,7 @@ function slotName(n){ return getNames()[n-1] || ("Контакт "+n); }
 /* ───────────── Состояние ───────────── */
 let roomName = "", roomId = "", myName = "";
 let callIn = false;            // v66: разговор начат ответом на входящий (экран подключения: «Соединяю…»)
+let genGuardUntil = 0;         // v67: сразу после смены экрана «Общий созвон» не нажимается (там был «✕ Завершить»)
 let withVideo = true, audioOnly = false, facing = "user";
 let localStream = null;
 let rooms = [];                // [{tag, room, sendMeta, sendMode}]
@@ -944,7 +946,7 @@ let timerInt = null, timerStart = 0;
 /* ───────────── Утилиты ───────────── */
 const $ = id => document.getElementById(id);
 function isIOS(){ return /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform==="MacIntel" && navigator.maxTouchPoints>1); }
-function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active")); $(id).classList.add("active"); }
+function show(id){ document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active")); $(id).classList.add("active"); genGuardUntil = Date.now() + 1200; }
 function setHomeStatus(msg, cls){ const el=$("homeStatus"); el.textContent=msg||""; el.className="status"+(cls?" "+cls:""); }
 function setWaitStatus(t){ const el=$("waitStatus"); if (el) el.textContent = t || ""; }
 let toastT = null;
@@ -1825,6 +1827,7 @@ function netTick(){
         kin: Math.round(x.dr * 8 / 2500), kout: Math.round(x.dt * 8 / 2500), tot: Math.round((NET.totalRx + NET.totalTx) / 1048576) });
     }
     callStatSave();
+    carDarkCheck();
     // авто «только звук»: через TURN на мобильной (экономия 500 МБ) ИЛИ в автомобиле (Android Auto)
     if (peers.size <= 1 && isCar() && !NET.carFlagged){
       NET.carFlagged=true; try{ applyAudioOnly(true,true,"car"); }catch(_){}
@@ -1929,6 +1932,33 @@ function updateModeBtn(){
   b.textContent = audioOnly ? "📹 Вернуть видео" : "🎙 Аудио для всех";
   b.classList.toggle("modeon", audioOnly);
 }
+
+/* ───── v67: машина, звонок «только звук» — экран телефона гаснет сам ─────
+   5 с без касаний — чёрный экран и минимальная яркость (натив), дальше система выключает экран
+   по своему таймауту (в аудиозвонке экран не удерживается). Касание — экран снова виден на 5 с. */
+let carDarkT = null, carDarkOn = false;
+function carDarkWanted(){ return inRoom && !document.hidden && !localVideoLive() && isCar(); }
+function carDarkSet(on){
+  if (carDarkOn === on) return;
+  carDarkOn = on;
+  const el = $("carDark"); if (el) el.style.display = on ? "block" : "none";
+  try{ if (window.Android && Android.setDim) Android.setDim(!!on); }catch(_){}
+  if (on) zlog("car-dark");
+}
+function carDarkArm(){
+  clearTimeout(carDarkT); carDarkT = null;
+  if (!carDarkWanted()){ carDarkSet(false); return; }
+  carDarkT = setTimeout(()=>{ carDarkT = null; if (carDarkWanted()) carDarkSet(true); }, 5000);
+}
+/* касание: тёмный экран — показать; светлый — отложить затемнение */
+function carDarkTouch(e){
+  if (carDarkOn){ carDarkSet(false); if (e){ e.preventDefault(); e.stopPropagation(); } carDarkArm(); return; }
+  if (carDarkT) carDarkArm();
+}
+document.addEventListener("pointerdown", carDarkTouch, true);
+document.addEventListener("touchstart", carDarkTouch, { capture: true, passive: false });
+/* раз в 2,5 с (вместе со счётчиками): машина появилась — начать отсчёт, исчезла — показать экран */
+function carDarkCheck(){ if (!carDarkWanted()){ if (carDarkOn || carDarkT){ clearTimeout(carDarkT); carDarkT = null; carDarkSet(false); } } else if (!carDarkOn && !carDarkT) carDarkArm(); }
 
 /* ───────────── Погашенный экран → «только звук» ─────────────
    Экран погас (кнопкой или приложение ушло в фон без «картинки в картинке»):
@@ -3079,6 +3109,11 @@ function callContact(slot, video){
 }
 function callGeneral(video, src){
   primeAudio(); const my=getMySlot(); if(!my) return;
+  /* v67: нажали кнопку — не случайно ли (второе касание по «✕ Завершить», который был на этом месте)? */
+  if (src){
+    if (Date.now() < genGuardUntil){ zlog("call-guard", { src: src }); return; }
+    if (!confirm("Позвонить всем — общий созвон?")){ zlog("call-no", { src: src }); return; }
+  }
   if (isCar()) video=false;
   closeMenu();
   const room=(inRoom && roomName) ? roomName : GENERAL_ROOM, cid=newCid();
@@ -3119,6 +3154,7 @@ function leaveMeetingCore(){
   peers=new Map(); hadPeer=false; scrPaused=null; scrAudio=false; scrIsOff=false; noVidSent=false; camUserOff=false; clearTimeout(scrT);
   try{ if(localStream){ localStream.getTracks().forEach(t=>{ try{t.stop();}catch(_){} }); } }catch(_){}
   localStream=null; inRoom=false; try{ stopTimer(); }catch(_){}
+  clearTimeout(carDarkT); carDarkT=null; carDarkSet(false);   // v67: экран — обычный
   try{ sessionStorage.removeItem("zvk_auto_relay"); }catch(_){}
   const grid=$("grid"); if(grid) grid.innerHTML="";
 }
@@ -3170,7 +3206,7 @@ function renderMenuAll(){
   const mm=$("menuMe"); if(mm) mm.textContent="Я — "+slotName(getMySlot());
 }
 function renderContacts(){ renderMenuAll(); }
-function openMenu(){ const o=$("menuOverlay"); if(!o) return; buildContactRows($("menuList")); const mm=$("menuMe"); if(mm) mm.textContent="Я — "+slotName(getMySlot()); setMenuNote(""); o.classList.add("show"); }
+function openMenu(){ const o=$("menuOverlay"); if(!o) return; genGuardUntil = Date.now() + 1200; buildContactRows($("menuList")); const mm=$("menuMe"); if(mm) mm.textContent="Я — "+slotName(getMySlot()); setMenuNote(""); o.classList.add("show"); }
 function closeMenu(){ const o=$("menuOverlay"); if(o) o.classList.remove("show"); }
 function toggleMenu(){ const o=$("menuOverlay"); if(!o) return; o.classList.contains("show")?closeMenu():openMenu(); }
 function setMenuNote(t){ const a=$("menuNote"); if(a) a.textContent=t||""; const b=$("contactsStatus"); if(b) b.textContent=t||""; if(inRoom&&t){ try{ toast(t); }catch(_){} } }
